@@ -1,0 +1,12 @@
+{
+    "originalApk":  {
+                        "sha256":  "ccdc6bc589473229266a08ecfe246375edd7568c9f4c00839018ee54d3c5df44",
+                        "path":  "C:\\Users\\comma\\Desktop\\arc_dark\\arcaea_6.14.12c.apk"
+                    },
+    "fixedApk":  {
+                     "sha256":  "3dff962069030c0cded123b01ad0a13639cd5e0967eab8e2a79f9a86627b6bbe",
+                     "path":  "C:\\Users\\comma\\Desktop\\arc_dark\\fixed.apk"
+                 },
+    "includedAssets":  348,
+    "excludedPolicy":  "Only added or changed ZIP entries under assets/ are included. Manifest, dex, resources, native libraries, and META-INF signatures are excluded."
+}

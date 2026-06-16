@@ -1,0 +1,54 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "dev.arc.assets"
+    compileSdk 35
+    ndkVersion "27.2.12479018"
+
+    defaultConfig {
+        applicationId "dev.arc.assets"
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0"
+
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a"
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_static"
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        prefab true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+}
+
+dependencies {
+    compileOnly "de.robv.android.xposed:api:82"
+    implementation "dev.rikka.ndk.thirdparty:xhook:1.2.0"
+}
