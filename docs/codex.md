@@ -6,21 +6,23 @@
 - 目标：把 Arcaea 素材改包迁移成 LSPosed 模块，不修改官方 `moe.low.arc` APK，不改签名，不改包名。
 - 模块包名：`dev.arc.assets`
 - 目标包名 / 推荐作用域：`moe.low.arc`
-- 版本：`0.1.5 (5)`
+- 版本：`0.2.0 (6)`
 - 覆盖素材数量：348
 - 当前结论：MVP 架构已完成并经设备验证。
 
 ## 当前实现
 
 - `dev.arc.assets` 有普通桌面入口 `MainActivity`。
-- UI 提供注入开关、当前包状态、素材包列表、刷新、复制诊断、Open Arcaea。
+- UI 提供注入开关、当前覆盖栈状态、可滚动素材包列表、ZIP 导入、刷新、复制诊断、Open Arcaea。
 - 素材包：
   - `<default>`：模块 APK 内置素材。
   - `test_pkg`：目标进程生成到 `/sdcard/Android/media/moe.low.arc/ArcDark/packs/test_pkg/` 的真实文件包。
+  - 第三方 ZIP：UI 选择后通过 URI 授权交给目标进程解包到 `/sdcard/Android/media/moe.low.arc/ArcDark/packs/<packId>/`。
 - 控制文件：
   - UI 本地配置：`/data/user/0/dev.arc.assets/files/control.json`
   - 目标侧生效配置：`/sdcard/Android/media/moe.low.arc/ArcDark/control.json`
-- UI 点击 `Open Arcaea` 时通过 intent extras 把开关和包 ID 传给目标进程；目标进程写入自己的 `ArcDark/control.json`，后续普通重启复用该状态。
+- UI 点击 `Open Arcaea` 时通过 intent extras 把开关和 `active_pack_order` 传给目标进程；目标进程写入自己的 `ArcDark/control.json`，后续普通重启复用该状态。
+- 覆盖栈从上到下查找素材，全部缺失时不拦截，保留游戏原始素材；`<default>` 是显式可选层，不是第三方包的隐式兜底。
 
 ## Hook 路线
 
@@ -64,6 +66,6 @@ app/build/outputs/apk/debug/app-debug.apk
 
 1. 在当前 MVP 上提交一次功能收尾提交。
 2. 做 release/debug 日志分级，release 减少 LSPosed 日志噪音。
-3. 扩展素材包管理时沿用 `packs/<packId>/` 结构。
+3. 扩展素材包管理时沿用 `packs/<packId>/` 结构和 `active_pack_order` 覆盖栈。
 4. 低版本 Android 权限适配后续再单独评估。
 5. 不要回到 Java `System.load*` hook 路线。

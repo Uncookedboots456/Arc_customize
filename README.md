@@ -6,12 +6,12 @@ LSPosed/Xposed module for applying Arc Dark asset overrides to the official Arca
 
 - Module package: `dev.arc.assets`
 - Target package / LSPosed scope: `moe.low.arc`
-- Version: `0.1.5`
+- Version: `0.2.0`
 - Asset overrides: 348
 - Supported ABI: `arm64-v8a`, `armeabi-v7a`
 - Runtime root: `/sdcard/Android/media/moe.low.arc/ArcDark/`
 
-The launcher UI provides an injection switch, a material pack list, status summary, diagnostics copy, refresh, and Open Arcaea.
+The launcher UI provides an injection switch, a scrollable material pack stack, ZIP import, status summary, diagnostics copy, refresh, and Open Arcaea.
 
 ## Material Packs
 
@@ -22,6 +22,23 @@ The launcher UI provides an injection switch, a material pack list, status summa
 /sdcard/Android/media/moe.low.arc/ArcDark/packs/test_pkg/
 ```
 
+Third-party packs are imported from ZIP files. A ZIP pack must contain root-level `pack.json` plus files under `assets/`, for example:
+
+```text
+pack.json
+assets/img/track.png
+assets/img/note.png
+assets/models/tap_l.png
+```
+
+The module extracts imported ZIP packs in the target process to:
+
+```text
+/sdcard/Android/media/moe.low.arc/ArcDark/packs/<packId>/
+```
+
+The active configuration is an ordered override stack stored as `active_pack_order`. Resource lookup checks enabled packs from top to bottom. If no enabled pack contains a requested asset, the hook does not intercept it and Arcaea uses its original asset. `<default>` is an explicit selectable layer, not an implicit fallback for third-party packs.
+
 The UI stores its local control file under `dev.arc.assets`. Pressing Open Arcaea sends the current control state to the target process, which persists the active state to:
 
 ```text
@@ -29,6 +46,14 @@ The UI stores its local control file under `dev.arc.assets`. Pressing Open Arcae
 ```
 
 Later Arcaea restarts reuse that target-side control file.
+
+## Sample Pack
+
+The repository root contains `arc-dark-sample-pack.zip`, a small import smoke-test pack generated from bundled assets. Regenerate it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Generate-SamplePack.ps1
+```
 
 ## Build
 

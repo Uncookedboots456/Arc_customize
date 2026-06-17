@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 final class AssetOverrideIndex {
@@ -53,6 +55,26 @@ final class AssetOverrideIndex {
         }
 
         return new AssetOverrideIndex(Collections.unmodifiableMap(loaded));
+    }
+
+    static AssetOverrideIndex of(Collection<AssetOverride> entries) {
+        Map<String, AssetOverride> loaded = new LinkedHashMap<>();
+        for (AssetOverride entry : entries) {
+            loaded.put(entry.assetPath, entry);
+        }
+        return new AssetOverrideIndex(Collections.unmodifiableMap(loaded));
+    }
+
+    static AssetOverrideIndex merge(List<AssetOverrideIndex> indexes) {
+        Map<String, AssetOverride> merged = new LinkedHashMap<>();
+        for (AssetOverrideIndex index : indexes) {
+            for (AssetOverride override : index.entries()) {
+                if (!merged.containsKey(override.assetPath)) {
+                    merged.put(override.assetPath, override);
+                }
+            }
+        }
+        return new AssetOverrideIndex(Collections.unmodifiableMap(merged));
     }
 
     AssetOverride find(String requestedPath) {

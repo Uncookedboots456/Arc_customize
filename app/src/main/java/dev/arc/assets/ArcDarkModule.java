@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -13,6 +14,8 @@ import android.os.ParcelFileDescriptor;
 
 import java.io.File;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.IXposedHookZygoteInit;
@@ -75,13 +78,13 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
                         Intent intent = activity.getIntent();
                         XposedBridge.log("ArcDark: Activity.onCreate called, activity="
                                 + activity.getClass().getName());
-                        installOnce(activity, ArcDarkRuntimeControl.read(activity, intent));
+                        installOnce(activity, intent);
                     }
                 }
         );
     }
 
-    private static synchronized void installOnce(Context targetContext, ArcDarkControl.Control control) {
+    private static synchronized void installOnce(Context targetContext, Intent intent) {
         if (installed) {
             return;
         }
@@ -94,10 +97,12 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
             XposedBridge.log("ArcDark: index loaded, count=" + index.size());
 
             File root = ArcDarkPaths.targetRoot(targetContext);
+            ArcDarkControl.Control control = ArcDarkRuntimeControl.read(targetContext, intent);
+            control = importPendingPackIfNeeded(targetContext, root, intent, control);
             XposedBridge.log("ArcDark: control injection="
                     + control.injectionEnabled
-                    + ", activePack="
-                    + control.activePackId
+                    + ", activeOrder="
+                    + control.activePackOrder
                     + ", root="
                     + root);
 
@@ -108,34 +113,20 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
                 return;
             }
 
-            AssetOverrideIndex activeIndex = index;
-            BundledAssetProvider bundled = new BundledAssetProvider(moduleAssets, targetContext, index);
-            AssetProvider activeProvider = bundled;
-            String activePackId = ArcDarkConstants.DEFAULT_PACK_ID;
-
-            if (ArcDarkConstants.TEST_PACK_ID.equals(control.activePackId)) {
-                try {
-                    File packDir = TestPackSeeder.ensureTestPack(moduleAssets, root, index);
-                    FilePackProvider filePackProvider = new FilePackProvider(packDir, index);
-                    preflightFilePack(filePackProvider, index);
-                    activeProvider = filePackProvider;
-                    activePackId = ArcDarkConstants.TEST_PACK_ID;
-                    XposedBridge.log("ArcDark: using file pack " + packDir);
-                } catch (Throwable throwable) {
-                    XposedBridge.log("ArcDark: unable to use test_pkg; falling back to default");
-                    XposedBridge.log(throwable);
-                }
-            } else {
+            ActiveLayers activeLayers = buildActiveLayers(moduleAssets, targetContext, root, index, control);
+            if (activeLayers.index.size() == 0) {
                 TestPackSeeder.ensureTestPackAsync(moduleAssets, root, index);
-                XposedBridge.log("ArcDark: using bundled default pack");
+                installed = true;
+                XposedBridge.log("ArcDark: no active asset overrides; original game assets remain in use");
+                return;
             }
 
-            provider = activeProvider;
-            XposedBridge.log("ArcDark: provider initialized for " + activePackId);
+            provider = activeLayers.provider;
+            XposedBridge.log("ArcDark: provider initialized for " + activeLayers.packOrder);
 
             attachModuleAssetPath(targetContext);
 
-            boolean nativeInstalled = NativeBridge.install(modulePath, activeProvider, activeIndex);
+            boolean nativeInstalled = NativeBridge.install(modulePath, activeLayers.provider, activeLayers.index);
             if (nativeInstalled) {
                 NativeBridge.refreshHooks("initial");
                 scheduleNativeRefreshes();
@@ -151,11 +142,11 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
             XposedBridge.log("ArcDark: hook AssetManager.openFd(String) installed");
 
             installed = true;
-            XposedBridge.log("ArcDark: installed Java hooks for " + activeIndex.size()
+            XposedBridge.log("ArcDark: installed Java hooks for " + activeLayers.index.size()
                     + " asset overrides for "
                     + ArcDarkConstants.TARGET_PACKAGE
-                    + ", provider="
-                    + activePackId
+                    + ", order="
+                    + activeLayers.packOrder
                     + ", native="
                     + nativeInstalled);
         } catch (Throwable throwable) {
@@ -164,9 +155,113 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
         }
     }
 
-    private static void preflightFilePack(FilePackProvider provider, AssetOverrideIndex index) throws Exception {
+    private static ArcDarkControl.Control importPendingPackIfNeeded(
+            Context targetContext,
+            File root,
+            Intent intent,
+            ArcDarkControl.Control control
+    ) {
+        Uri importUri = ArcDarkRuntimeControl.readImportUri(intent);
+        if (importUri == null) {
+            return control;
+        }
+
+        try {
+            ImportedPackInstaller.ImportResult result =
+                    ImportedPackInstaller.install(targetContext, root, importUri);
+            ArcDarkControl.Control imported = control.withPackAtFront(result.manifest.id);
+            ArcDarkControl.writeFile(ArcDarkRuntimeControl.targetControlFile(targetContext), imported);
+            XposedBridge.log("ArcDark: imported pack "
+                    + result.manifest.id
+                    + " assets="
+                    + result.assetCount
+                    + " dir="
+                    + result.packDir);
+            return imported;
+        } catch (Throwable throwable) {
+            XposedBridge.log("ArcDark: import pack failed");
+            XposedBridge.log(throwable);
+            return control;
+        }
+    }
+
+    private static ActiveLayers buildActiveLayers(
+            AssetManager moduleAssets,
+            Context targetContext,
+            File root,
+            AssetOverrideIndex bundledIndex,
+            ArcDarkControl.Control control
+    ) {
+        List<AssetProvider> providers = new ArrayList<>();
+        List<AssetOverrideIndex> indexes = new ArrayList<>();
+        List<String> activeOrder = new ArrayList<>();
+        BundledAssetProvider bundled = new BundledAssetProvider(moduleAssets, targetContext, bundledIndex);
+
+        for (String packId : control.activePackOrder) {
+            if (ArcDarkConstants.DEFAULT_PACK_ID.equals(packId)) {
+                providers.add(bundled);
+                indexes.add(bundledIndex);
+                activeOrder.add(packId);
+                XposedBridge.log("ArcDark: using bundled default layer");
+                continue;
+            }
+
+            if (ArcDarkConstants.TEST_PACK_ID.equals(packId)) {
+                try {
+                    File packDir = TestPackSeeder.ensureTestPack(moduleAssets, root, bundledIndex);
+                    FilePackProvider filePackProvider = new FilePackProvider(packDir, bundledIndex);
+                    preflightProvider(filePackProvider, bundledIndex);
+                    providers.add(filePackProvider);
+                    indexes.add(bundledIndex);
+                    activeOrder.add(packId);
+                    XposedBridge.log("ArcDark: using test layer " + packDir);
+                } catch (Throwable throwable) {
+                    XposedBridge.log("ArcDark: unable to use test_pkg layer");
+                    XposedBridge.log(throwable);
+                }
+                continue;
+            }
+
+            try {
+                File packDir = ArcDarkPaths.packDir(root, packId);
+                AssetOverrideIndex packIndex = AssetOverrideIndex.load(
+                        new File(packDir, "arc_overrides/index.json")
+                );
+                FilePackProvider filePackProvider = new FilePackProvider(packDir, packIndex);
+                preflightProvider(filePackProvider, packIndex);
+                providers.add(filePackProvider);
+                indexes.add(packIndex);
+                activeOrder.add(packId);
+                XposedBridge.log("ArcDark: using imported layer " + packDir
+                        + " assets=" + packIndex.size());
+            } catch (Throwable throwable) {
+                XposedBridge.log("ArcDark: unable to use imported layer " + packId);
+                XposedBridge.log(throwable);
+            }
+        }
+
+        AssetProvider activeProvider = providers.size() == 1
+                ? providers.get(0)
+                : new CompositeAssetProvider(providers.toArray(new AssetProvider[0]));
+        AssetOverrideIndex activeIndex = AssetOverrideIndex.merge(indexes);
+        return new ActiveLayers(activeProvider, activeIndex, activeOrder);
+    }
+
+    private static void preflightProvider(AssetProvider provider, AssetOverrideIndex index) throws Exception {
         for (AssetOverride override : index.entries()) {
             provider.materialize(override.assetPath);
+        }
+    }
+
+    private static final class ActiveLayers {
+        final AssetProvider provider;
+        final AssetOverrideIndex index;
+        final List<String> packOrder;
+
+        ActiveLayers(AssetProvider provider, AssetOverrideIndex index, List<String> packOrder) {
+            this.provider = provider;
+            this.index = index;
+            this.packOrder = packOrder;
         }
     }
 

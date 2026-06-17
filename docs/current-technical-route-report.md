@@ -8,9 +8,11 @@ Arc Dark 的 MVP 架构已经完成并通过设备验证。当前路线保持官
 
 - 桌面入口和控制台式 UI 可用。
 - 注入开关可控制是否安装 hook。
-- 素材包列表包含 `<default>` 和 `test_pkg`。
+- 素材包列表为可滚动覆盖栈，包含 `<default>`、`test_pkg` 和导入的第三方 ZIP 包。
 - `<default>` 使用模块 APK 内置素材。
 - `test_pkg` 会复制为目标进程可读的真实文件包。
+- 第三方 ZIP 包由 UI 选择后通过 URI 授权交给目标进程解包到 `packs/<packId>/`。
+- 生效顺序由 `active_pack_order` 控制，从上到下查找；全部缺失时保留游戏原始素材。
 - native map 可以指向 `packs/test_pkg` 下的文件。
 - 进入谱面加载后已确认 `ArcDarkNative: asset hit` 指向 `packs/test_pkg`。
 - 关闭注入后不会注册 native map，也不会安装 Java/native asset hook。
@@ -19,7 +21,7 @@ Arc Dark 的 MVP 架构已经完成并通过设备验证。当前路线保持官
 
 - 模块包名：`dev.arc.assets`
 - 目标包名 / LSPosed 作用域：`moe.low.arc`
-- 版本：`0.1.5 (5)`
+- 版本：`0.2.0 (6)`
 - native ABI：`arm64-v8a`, `armeabi-v7a`
 - 覆盖素材数量：348
 - 构建脚本：`scripts/Build-Debug.ps1`
@@ -48,6 +50,11 @@ ArcDark/
       arc_overrides/summary.json
       img/...
       models/...
+    <packId>/
+      pack.json
+      arc_overrides/index.json
+      arc_overrides/summary.json
+      assets/...
 ```
 
 控制流：
@@ -61,11 +68,21 @@ ArcDark/
 
 这个设计避免了 `dev.arc.assets` 私有目录跨包读取失败，也不需要 `READ_EXTERNAL_STORAGE`、`WRITE_EXTERNAL_STORAGE` 或 `MANAGE_EXTERNAL_STORAGE`。
 
+第三方 ZIP 导入流：
+
+1. UI 使用 `ACTION_OPEN_DOCUMENT` 选择 ZIP。
+2. UI 校验根级 `pack.json`，并把 ZIP `Uri` 通过启动 intent、`ClipData` 和 `FLAG_GRANT_READ_URI_PERMISSION` 传给 Arcaea。
+3. 目标进程在安装 hook 前读取该 `Uri`，只接受根级 `pack.json` 和 `assets/...` 普通文件。
+4. 目标进程写入 `packs/<packId>.tmp-import/`，生成 `arc_overrides/index.json` 和 `summary.json`。
+5. 校验完成后原子替换 `packs/<packId>/`，并把 `<packId>` 放到 `active_pack_order` 顶部。
+
 ## 素材包与 Hook 路线
 
 `<default>` 是模块 APK 内置素材包。目标进程启动时直接从模块 APK 读取索引和素材，必要时 materialize 到目标进程可用路径。
 
 `test_pkg` 是文件素材包。首次需要时，目标进程从模块 APK 内置素材复制生成完整目录。已验证文件数为 351，即 348 个素材文件加 `pack.json`、`index.json`、`summary.json`。
+
+第三方素材包是部分覆盖包。每个包拥有自己的 `arc_overrides/index.json`，条目来自 ZIP 内 `assets/...` 文件。激活时模块按 `active_pack_order` 合成最终 native map：同一个 `assetPath` 只采用最高优先级层；没有任何启用层命中的路径不进入 map，继续由游戏原始资源处理。`<default>` 只是可选层，不作为隐式兜底。
 
 Hook 路线：
 

@@ -11,15 +11,15 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -33,28 +33,26 @@ import java.io.File;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final String INDEX_ASSET = "arc_overrides/index.json";
     private static final String APPLY_NOTICE =
-            "Force stop or fully close Arcaea, then tap Open Arcaea here to apply changes. "
-                    + "Later restarts reuse the applied state.";
-    private static final int ID_DEFAULT_PACK = 1001;
-    private static final int ID_TEST_PACK = 1002;
+            "Use Open Arcaea to apply changes. Later restarts reuse the applied state.";
+    private static final int REQUEST_IMPORT_ZIP = 2001;
 
     private TextView injectionStatusValue;
     private TextView currentPackValue;
     private TextView targetStatusValue;
     private TextView assetCountValue;
     private TextView rootPathValue;
-    private TextView testPackStatusValue;
+    private TextView packSummaryValue;
     private TextView restartNoticeValue;
     private Switch injectionSwitch;
-    private RadioGroup packGroup;
-    private RadioButton defaultPackRadio;
-    private RadioButton testPackRadio;
+    private LinearLayout packList;
     private Button openTargetButton;
     private StatusSnapshot snapshot;
     private boolean binding;
@@ -71,6 +69,30 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshStatus();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_IMPORT_ZIP || resultCode != RESULT_OK || data == null) {
+            return;
+        }
+
+        Uri uri = data.getData();
+        if (uri == null) {
+            Toast.makeText(this, "Selected file is unavailable", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            PackManifest manifest = ImportedPackInstaller.readManifest(this, uri);
+            ArcDarkControl.Control next = ArcDarkControl.readLocal(this).withPackAtFront(manifest.id);
+            ArcDarkControl.writeLocal(this, next);
+            refreshStatus();
+            openTargetApp(uri);
+        } catch (Exception exception) {
+            Toast.makeText(this, "Invalid Arc Dark ZIP pack", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private View createContentView() {
@@ -92,10 +114,13 @@ public final class MainActivity extends Activity {
                 || getResources().getConfiguration().screenWidthDp >= 700;
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        main.setBaselineAligned(false);
         root.addView(main, withTopMargin(dp(18)));
 
+        View injectionPanel = createInjectionPanel();
+        View packPanel = createPackPanel(wide);
         if (wide) {
-            main.addView(createInjectionPanel(), new LinearLayout.LayoutParams(
+            main.addView(injectionPanel, new LinearLayout.LayoutParams(
                     0,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     1.1f
@@ -106,10 +131,11 @@ public final class MainActivity extends Activity {
                     0.9f
             );
             packParams.leftMargin = dp(14);
-            main.addView(createPackPanel(), packParams);
+            main.addView(packPanel, packParams);
+            main.post(() -> alignPanelHeights(injectionPanel, packPanel));
         } else {
-            main.addView(createInjectionPanel());
-            main.addView(createPackPanel(), withTopMargin(dp(14)));
+            main.addView(injectionPanel);
+            main.addView(packPanel, withTopMargin(dp(14)));
         }
 
         root.addView(createActionPanel(wide), withTopMargin(dp(14)));
@@ -168,9 +194,9 @@ public final class MainActivity extends Activity {
         panel.addView(injectionSwitch);
 
         injectionStatusValue = addStatusRow(panel, "State");
-        currentPackValue = addStatusRow(panel, "Active pack");
+        currentPackValue = addStatusRow(panel, "Pack order");
         targetStatusValue = addStatusRow(panel, "Target app");
-        assetCountValue = addStatusRow(panel, "Overrides");
+        assetCountValue = addStatusRow(panel, "Bundled");
 
         rootPathValue = bodyText();
         panel.addView(label("Runtime path"), withTopMargin(dp(12)));
@@ -182,23 +208,32 @@ public final class MainActivity extends Activity {
         return panel;
     }
 
-    private View createPackPanel() {
+    private View createPackPanel(boolean wide) {
         LinearLayout panel = panel();
         panel.addView(sectionTitle("Material packs"));
 
-        packGroup = new RadioGroup(this);
-        packGroup.setOrientation(RadioGroup.VERTICAL);
-        packGroup.setOnCheckedChangeListener(this::onPackChanged);
+        ScrollView listScroll = new ScrollView(this);
+        listScroll.setVerticalScrollBarEnabled(true);
+        listScroll.setScrollbarFadingEnabled(false);
+        listScroll.setFillViewport(false);
+        packList = new LinearLayout(this);
+        packList.setOrientation(LinearLayout.VERTICAL);
+        listScroll.addView(packList, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT
+        ));
 
-        defaultPackRadio = packRadio(ID_DEFAULT_PACK, ArcDarkConstants.DEFAULT_PACK_ID, "Bundled assets inside the module APK");
-        testPackRadio = packRadio(ID_TEST_PACK, ArcDarkConstants.TEST_PACK_ID, "File pack generated under the target app media folder");
-        packGroup.addView(defaultPackRadio);
-        packGroup.addView(testPackRadio, withTopMargin(dp(8)));
-        panel.addView(packGroup, withTopMargin(dp(10)));
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                wide ? 0 : dp(220),
+                wide ? 1f : 0f
+        );
+        listParams.topMargin = dp(10);
+        panel.addView(listScroll, listParams);
 
-        testPackStatusValue = bodyText();
-        panel.addView(label("test_pkg"), withTopMargin(dp(14)));
-        panel.addView(testPackStatusValue, withTopMargin(dp(4)));
+        packSummaryValue = bodyText();
+        panel.addView(label("Status"), withTopMargin(dp(12)));
+        panel.addView(packSummaryValue, withTopMargin(dp(4)));
         return panel;
     }
 
@@ -207,15 +242,18 @@ public final class MainActivity extends Activity {
         panel.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
 
         Button refresh = createActionButton("Refresh", view -> refreshStatus());
+        Button importZip = createActionButton("Import ZIP", view -> openImportPicker());
         Button copy = createActionButton("Copy diagnostics", this::copyDiagnostics);
-        openTargetButton = createActionButton("Open Arcaea", view -> openTargetApp());
+        openTargetButton = createActionButton("Open Arcaea", view -> openTargetApp(null));
 
         if (wide) {
             panel.addView(refresh, weightedButton());
+            panel.addView(importZip, weightedButtonWithLeftMargin());
             panel.addView(copy, weightedButtonWithLeftMargin());
             panel.addView(openTargetButton, weightedButtonWithLeftMargin());
         } else {
             panel.addView(refresh);
+            panel.addView(importZip, withTopMargin(dp(10)));
             panel.addView(copy, withTopMargin(dp(10)));
             panel.addView(openTargetButton, withTopMargin(dp(10)));
         }
@@ -230,15 +268,42 @@ public final class MainActivity extends Activity {
         return panel;
     }
 
-    private RadioButton packRadio(int id, String title, String description) {
-        RadioButton radio = new RadioButton(this);
-        radio.setId(id);
-        radio.setText(title + "\n" + description);
-        radio.setTextColor(Color.parseColor("#DCE5EC"));
-        radio.setTextSize(14);
-        radio.setLineSpacing(dp(2), 1f);
-        radio.setPadding(0, dp(4), 0, dp(4));
-        return radio;
+    private View createPackRow(PackCatalog.Entry entry, int activeIndex, int activeCount) {
+        boolean checked = activeIndex >= 0;
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackground(rounded(Color.parseColor("#121923"), Color.parseColor("#243344"), dp(7)));
+
+        CheckBox checkBox = new CheckBox(this);
+        checkBox.setText(entry.name + "\n" + entry.description);
+        checkBox.setTextColor(checked ? Color.parseColor("#F4F7FB") : Color.parseColor("#C8D4DF"));
+        checkBox.setTextSize(13);
+        checkBox.setLineSpacing(dp(2), 1f);
+        checkBox.setChecked(checked);
+        checkBox.setEnabled(checked || entry.available || ArcDarkConstants.TEST_PACK_ID.equals(entry.id));
+        checkBox.setOnCheckedChangeListener((button, enabled) -> onPackEnabledChanged(entry.id, enabled));
+        row.addView(checkBox);
+
+        if (checked) {
+            LinearLayout controls = new LinearLayout(this);
+            controls.setOrientation(LinearLayout.HORIZONTAL);
+            controls.setGravity(Gravity.END);
+
+            Button up = smallButton("Up", view -> movePack(entry.id, -1));
+            up.setEnabled(activeIndex > 0);
+            up.setAlpha(activeIndex > 0 ? 1f : 0.45f);
+            Button down = smallButton("Down", view -> movePack(entry.id, 1));
+            down.setEnabled(activeIndex < activeCount - 1);
+            down.setAlpha(activeIndex < activeCount - 1 ? 1f : 0.45f);
+            controls.addView(up, smallButtonParams());
+            LinearLayout.LayoutParams downParams = smallButtonParams();
+            downParams.leftMargin = dp(8);
+            controls.addView(down, downParams);
+            row.addView(controls, withTopMargin(dp(6)));
+        }
+
+        return row;
     }
 
     private TextView addStatusRow(LinearLayout panel, String labelText) {
@@ -309,30 +374,71 @@ public final class MainActivity extends Activity {
         return button;
     }
 
+    private Button smallButton(String text, View.OnClickListener listener) {
+        Button button = createActionButton(text, listener);
+        button.setTextSize(12);
+        button.setMinHeight(dp(34));
+        button.setPadding(dp(10), 0, dp(10), 0);
+        return button;
+    }
+
     private void refreshStatus() {
         snapshot = StatusSnapshot.capture(this);
         binding = true;
         injectionSwitch.setChecked(snapshot.control.injectionEnabled);
-        packGroup.check(ArcDarkConstants.TEST_PACK_ID.equals(snapshot.control.activePackId)
-                ? ID_TEST_PACK
-                : ID_DEFAULT_PACK);
         binding = false;
 
         injectionStatusValue.setText(snapshot.control.injectionEnabled ? "Enabled" : "Disabled");
         injectionStatusValue.setTextColor(snapshot.control.injectionEnabled
                 ? Color.parseColor("#80E6A2")
                 : Color.parseColor("#FFB87A"));
-        currentPackValue.setText(snapshot.control.activePackId);
+        currentPackValue.setText(formatPackOrder(snapshot.control.activePackOrder));
         targetStatusValue.setText(snapshot.targetInstalled ? "Installed" : "Not installed");
         targetStatusValue.setTextColor(snapshot.targetInstalled
                 ? Color.parseColor("#80E6A2")
                 : Color.parseColor("#FFB87A"));
         assetCountValue.setText(snapshot.overrideCount);
         rootPathValue.setText(snapshot.targetRootPath);
-        testPackStatusValue.setText(snapshot.testPackStatus);
+        packSummaryValue.setText(snapshot.packSummary);
         restartNoticeValue.setText(APPLY_NOTICE);
         openTargetButton.setEnabled(snapshot.targetInstalled);
         openTargetButton.setAlpha(snapshot.targetInstalled ? 1f : 0.55f);
+        rebuildPackList();
+    }
+
+    private void rebuildPackList() {
+        packList.removeAllViews();
+        int activeCount = snapshot.control.activePackOrder.size();
+        for (PackCatalog.Entry entry : displayPacksInOrder()) {
+            int activeIndex = snapshot.control.activePackOrder.indexOf(entry.id);
+            LinearLayout.LayoutParams params = withTopMargin(packList.getChildCount() == 0 ? 0 : dp(8));
+            packList.addView(createPackRow(entry, activeIndex, activeCount), params);
+        }
+    }
+
+    private List<PackCatalog.Entry> displayPacksInOrder() {
+        List<PackCatalog.Entry> ordered = new ArrayList<>();
+        for (String packId : snapshot.control.activePackOrder) {
+            PackCatalog.Entry entry = findPackEntry(packId);
+            if (entry != null) {
+                ordered.add(entry);
+            }
+        }
+        for (PackCatalog.Entry entry : snapshot.packs) {
+            if (snapshot.control.activePackOrder.indexOf(entry.id) < 0) {
+                ordered.add(entry);
+            }
+        }
+        return ordered;
+    }
+
+    private PackCatalog.Entry findPackEntry(String packId) {
+        for (PackCatalog.Entry entry : snapshot.packs) {
+            if (entry.id.equals(packId)) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     private void onInjectionChanged(CompoundButton button, boolean enabled) {
@@ -342,14 +448,34 @@ public final class MainActivity extends Activity {
         saveControl(ArcDarkControl.readLocal(this).withInjectionEnabled(enabled));
     }
 
-    private void onPackChanged(RadioGroup group, int checkedId) {
-        if (binding) {
+    private void onPackEnabledChanged(String packId, boolean enabled) {
+        if (binding || snapshot == null) {
             return;
         }
-        String packId = checkedId == ID_TEST_PACK
-                ? ArcDarkConstants.TEST_PACK_ID
-                : ArcDarkConstants.DEFAULT_PACK_ID;
-        saveControl(ArcDarkControl.readLocal(this).withActivePackId(packId));
+        List<String> order = new ArrayList<>(snapshot.control.activePackOrder);
+        if (enabled) {
+            if (!order.contains(packId)) {
+                order.add(packId);
+            }
+        } else {
+            order.remove(packId);
+        }
+        saveControl(snapshot.control.withActivePackOrder(order));
+    }
+
+    private void movePack(String packId, int direction) {
+        if (snapshot == null) {
+            return;
+        }
+        List<String> order = new ArrayList<>(snapshot.control.activePackOrder);
+        int index = order.indexOf(packId);
+        int nextIndex = index + direction;
+        if (index < 0 || nextIndex < 0 || nextIndex >= order.size()) {
+            return;
+        }
+        String moving = order.remove(index);
+        order.add(nextIndex, moving);
+        saveControl(snapshot.control.withActivePackOrder(order));
     }
 
     private void saveControl(ArcDarkControl.Control control) {
@@ -374,6 +500,18 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void openImportPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/zip",
+                "application/octet-stream",
+                "application/x-zip-compressed"
+        });
+        startActivityForResult(intent, REQUEST_IMPORT_ZIP);
+    }
+
     private void copyDiagnostics(View ignored) {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard == null || snapshot == null) {
@@ -384,7 +522,7 @@ public final class MainActivity extends Activity {
         Toast.makeText(this, "Diagnostics copied", Toast.LENGTH_SHORT).show();
     }
 
-    private void openTargetApp() {
+    private void openTargetApp(Uri importUri) {
         Intent launchIntent = getPackageManager().getLaunchIntentForPackage(ArcDarkConstants.TARGET_PACKAGE);
         if (launchIntent == null) {
             Toast.makeText(this, "Arcaea is not installed", Toast.LENGTH_SHORT).show();
@@ -392,8 +530,43 @@ public final class MainActivity extends Activity {
         }
         ArcDarkControl.Control control = ArcDarkControl.readLocal(this);
         launchIntent.putExtra(ArcDarkRuntimeControl.EXTRA_INJECTION_ENABLED, control.injectionEnabled);
-        launchIntent.putExtra(ArcDarkRuntimeControl.EXTRA_ACTIVE_PACK_ID, control.activePackId);
+        launchIntent.putExtra(ArcDarkRuntimeControl.EXTRA_ACTIVE_PACK_ID, control.primaryPackId());
+        launchIntent.putExtra(
+                ArcDarkRuntimeControl.EXTRA_ACTIVE_PACK_ORDER,
+                control.activePackOrder.toArray(new String[0])
+        );
+        if (importUri != null) {
+            launchIntent.putExtra(ArcDarkRuntimeControl.EXTRA_IMPORT_PACK_URI, importUri);
+            launchIntent.setClipData(ClipData.newUri(getContentResolver(), "Arc Dark ZIP pack", importUri));
+            launchIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
         startActivity(launchIntent);
+    }
+
+    private void alignPanelHeights(View left, View right) {
+        int height = left.getHeight();
+        if (height <= 0) {
+            return;
+        }
+        android.view.ViewGroup.LayoutParams params = right.getLayoutParams();
+        if (params != null && params.height != height) {
+            params.height = height;
+            right.setLayoutParams(params);
+        }
+    }
+
+    private String formatPackOrder(List<String> packOrder) {
+        if (packOrder.isEmpty()) {
+            return "Original";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < packOrder.size(); i++) {
+            if (i > 0) {
+                builder.append(" > ");
+            }
+            builder.append(packOrder.get(i));
+        }
+        return builder.toString();
     }
 
     private GradientDrawable rounded(int fillColor, int strokeColor, int radius) {
@@ -423,6 +596,10 @@ public final class MainActivity extends Activity {
         return params;
     }
 
+    private LinearLayout.LayoutParams smallButtonParams() {
+        return new LinearLayout.LayoutParams(dp(82), LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
@@ -432,7 +609,8 @@ public final class MainActivity extends Activity {
         final String overrideCount;
         final boolean targetInstalled;
         final String targetRootPath;
-        final String testPackStatus;
+        final List<PackCatalog.Entry> packs;
+        final String packSummary;
         final String diagnostics;
 
         private StatusSnapshot(
@@ -440,14 +618,16 @@ public final class MainActivity extends Activity {
                 String overrideCount,
                 boolean targetInstalled,
                 String targetRootPath,
-                String testPackStatus,
+                List<PackCatalog.Entry> packs,
+                String packSummary,
                 String diagnostics
         ) {
             this.control = control;
             this.overrideCount = overrideCount;
             this.targetInstalled = targetInstalled;
             this.targetRootPath = targetRootPath;
-            this.testPackStatus = testPackStatus;
+            this.packs = packs;
+            this.packSummary = packSummary;
             this.diagnostics = diagnostics;
         }
 
@@ -457,11 +637,23 @@ public final class MainActivity extends Activity {
             String overrideCount = readOverrideCount(activity);
             boolean targetInstalled = isPackageInstalled(activity, ArcDarkConstants.TARGET_PACKAGE);
             File targetRoot = ArcDarkPaths.estimatedTargetRoot();
-            File testPack = ArcDarkPaths.packDir(targetRoot, ArcDarkConstants.TEST_PACK_ID);
-            String testPackStatus = new File(testPack, "pack.json").isFile()
-                    ? "Detected at " + testPack.getAbsolutePath()
-                    : "Generated by Arcaea on launch";
+            List<PackCatalog.Entry> packs = PackCatalog.list(targetRoot);
+            appendMissingActivePacks(packs, control.activePackOrder);
             String checkedAt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
+            String activeOrder = control.activePackOrder.isEmpty()
+                    ? "Original"
+                    : control.activePackOrder.toString();
+            int importedCount = 0;
+            for (PackCatalog.Entry entry : packs) {
+                if (!entry.builtIn) {
+                    importedCount++;
+                }
+            }
+            String packSummary = "Enabled layers: " + control.activePackOrder.size()
+                    + "\nImported packs: " + importedCount
+                    + "\nTop layer: " + (control.activePackOrder.isEmpty()
+                    ? "Original game assets"
+                    : control.activePackOrder.get(0));
             String diagnostics = "Arc Dark diagnostics"
                     + "\nChecked: " + checkedAt
                     + "\nModule package: " + activity.getPackageName()
@@ -469,8 +661,9 @@ public final class MainActivity extends Activity {
                     + "\nTarget package: " + ArcDarkConstants.TARGET_PACKAGE
                     + "\nTarget installed: " + targetInstalled
                     + "\nInjection enabled: " + control.injectionEnabled
-                    + "\nActive pack: " + control.activePackId
-                    + "\nAsset overrides: " + overrideCount
+                    + "\nActive pack order: " + activeOrder
+                    + "\nBundled overrides: " + overrideCount
+                    + "\nKnown packs: " + packs.size()
                     + "\nControl file: " + ArcDarkControl.controlFile(activity).getAbsolutePath()
                     + "\nTarget control: " + new File(targetRoot, ArcDarkConstants.CONTROL_FILE_NAME).getAbsolutePath()
                     + "\nTarget root: " + targetRoot.getAbsolutePath();
@@ -479,9 +672,31 @@ public final class MainActivity extends Activity {
                     overrideCount,
                     targetInstalled,
                     targetRoot.getAbsolutePath(),
-                    testPackStatus,
+                    packs,
+                    packSummary,
                     diagnostics
             );
+        }
+
+        private static void appendMissingActivePacks(List<PackCatalog.Entry> packs, List<String> activeOrder) {
+            for (String packId : activeOrder) {
+                boolean found = false;
+                for (PackCatalog.Entry entry : packs) {
+                    if (entry.id.equals(packId)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && ArcDarkControl.isAllowedPackId(packId)) {
+                    packs.add(new PackCatalog.Entry(
+                            packId,
+                            packId,
+                            "Not detected at the estimated runtime path",
+                            false,
+                            false
+                    ));
+                }
+            }
         }
 
         @SuppressWarnings("deprecation")

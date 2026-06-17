@@ -10,16 +10,22 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 final class ArcDarkControl {
     static final String KEY_INJECTION_ENABLED = "injection_enabled";
     static final String KEY_ACTIVE_PACK_ID = "active_pack_id";
+    static final String KEY_ACTIVE_PACK_ORDER = "active_pack_order";
 
     private ArcDarkControl() {
     }
 
     static Control defaults() {
-        return new Control(true, ArcDarkConstants.DEFAULT_PACK_ID);
+        return new Control(true, Collections.singletonList(ArcDarkConstants.DEFAULT_PACK_ID));
     }
 
     static Control readLocal(Context context) {
@@ -46,9 +52,17 @@ final class ArcDarkControl {
 
     static Control readJson(String json) throws Exception {
         JSONObject root = new JSONObject(json);
+        List<String> packOrder;
+        if (root.has(KEY_ACTIVE_PACK_ORDER)) {
+            packOrder = sanitizePackOrder(root.optJSONArray(KEY_ACTIVE_PACK_ORDER));
+        } else {
+            packOrder = Collections.singletonList(
+                    sanitizePackId(root.optString(KEY_ACTIVE_PACK_ID, ArcDarkConstants.DEFAULT_PACK_ID))
+            );
+        }
         return new Control(
                 root.optBoolean(KEY_INJECTION_ENABLED, true),
-                sanitizePackId(root.optString(KEY_ACTIVE_PACK_ID, ArcDarkConstants.DEFAULT_PACK_ID))
+                packOrder
         );
     }
 
@@ -60,7 +74,12 @@ final class ArcDarkControl {
 
         JSONObject root = new JSONObject();
         root.put(KEY_INJECTION_ENABLED, control.injectionEnabled);
-        root.put(KEY_ACTIVE_PACK_ID, sanitizePackId(control.activePackId));
+        root.put(KEY_ACTIVE_PACK_ID, control.primaryPackId());
+        org.json.JSONArray order = new org.json.JSONArray();
+        for (String packId : control.activePackOrder) {
+            order.put(packId);
+        }
+        root.put(KEY_ACTIVE_PACK_ORDER, order);
 
         File tmp = new File(file.getParentFile(), file.getName() + ".tmp");
         try (FileOutputStream out = new FileOutputStream(tmp)) {
@@ -79,10 +98,68 @@ final class ArcDarkControl {
     }
 
     static String sanitizePackId(String packId) {
-        if (ArcDarkConstants.TEST_PACK_ID.equals(packId)) {
-            return ArcDarkConstants.TEST_PACK_ID;
+        if (isAllowedPackId(packId)) {
+            return packId;
         }
         return ArcDarkConstants.DEFAULT_PACK_ID;
+    }
+
+    static boolean isAllowedPackId(String packId) {
+        return ArcDarkConstants.DEFAULT_PACK_ID.equals(packId)
+                || ArcDarkConstants.TEST_PACK_ID.equals(packId)
+                || isExternalPackId(packId);
+    }
+
+    static boolean isExternalPackId(String packId) {
+        if (packId == null || packId.length() == 0 || packId.length() > 64) {
+            return false;
+        }
+        if (ArcDarkConstants.DEFAULT_PACK_ID.equals(packId)
+                || ArcDarkConstants.TEST_PACK_ID.equals(packId)
+                || packId.endsWith(".tmp")
+                || packId.endsWith(".tmp-import")
+                || packId.endsWith(".backup-import")) {
+            return false;
+        }
+        for (int i = 0; i < packId.length(); i++) {
+            char c = packId.charAt(i);
+            boolean allowed = (c >= 'A' && c <= 'Z')
+                    || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9')
+                    || c == '.'
+                    || c == '_'
+                    || c == '-';
+            if (!allowed) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static List<String> sanitizePackOrder(Iterable<String> packIds) {
+        if (packIds == null) {
+            return Collections.emptyList();
+        }
+
+        Set<String> deduped = new LinkedHashSet<>();
+        for (String packId : packIds) {
+            if (isAllowedPackId(packId)) {
+                deduped.add(packId);
+            }
+        }
+        return Collections.unmodifiableList(new ArrayList<>(deduped));
+    }
+
+    private static List<String> sanitizePackOrder(org.json.JSONArray array) {
+        if (array == null) {
+            return Collections.emptyList();
+        }
+
+        List<String> values = new ArrayList<>(array.length());
+        for (int i = 0; i < array.length(); i++) {
+            values.add(array.optString(i, ""));
+        }
+        return sanitizePackOrder(values);
     }
 
     private static String readUtf8(InputStream input) throws Exception {
@@ -129,19 +206,41 @@ final class ArcDarkControl {
 
     static final class Control {
         final boolean injectionEnabled;
-        final String activePackId;
+        final List<String> activePackOrder;
 
-        Control(boolean injectionEnabled, String activePackId) {
+        Control(boolean injectionEnabled, List<String> activePackOrder) {
             this.injectionEnabled = injectionEnabled;
-            this.activePackId = sanitizePackId(activePackId);
+            this.activePackOrder = sanitizePackOrder(activePackOrder);
         }
 
         Control withInjectionEnabled(boolean enabled) {
-            return new Control(enabled, activePackId);
+            return new Control(enabled, activePackOrder);
         }
 
         Control withActivePackId(String packId) {
-            return new Control(injectionEnabled, packId);
+            return new Control(injectionEnabled, Collections.singletonList(sanitizePackId(packId)));
+        }
+
+        Control withActivePackOrder(List<String> packOrder) {
+            return new Control(injectionEnabled, packOrder);
+        }
+
+        Control withPackAtFront(String packId) {
+            if (!isAllowedPackId(packId)) {
+                return this;
+            }
+            List<String> next = new ArrayList<>();
+            next.add(packId);
+            for (String existing : activePackOrder) {
+                if (!packId.equals(existing)) {
+                    next.add(existing);
+                }
+            }
+            return new Control(injectionEnabled, next);
+        }
+
+        String primaryPackId() {
+            return activePackOrder.isEmpty() ? "" : activePackOrder.get(0);
         }
     }
 }
