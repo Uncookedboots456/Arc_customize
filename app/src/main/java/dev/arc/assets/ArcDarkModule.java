@@ -1,9 +1,12 @@
 package dev.arc.assets;
 
 import android.app.Application;
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
@@ -19,8 +22,6 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZygoteInit {
-    private static final String TARGET_PACKAGE = "moe.low.arc";
-
     private static String modulePath;
     private static boolean installed;
     private static AssetProvider provider;
@@ -41,7 +42,7 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
-        if (!TARGET_PACKAGE.equals(lpparam.packageName)) {
+        if (!ArcDarkConstants.TARGET_PACKAGE.equals(lpparam.packageName)) {
             return;
         }
 
@@ -60,13 +61,27 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
                         Context targetContext = (Context) param.args[0];
                         XposedBridge.log("ArcDark: Application.attach called, context package="
                                 + targetContext.getPackageName());
-                        installOnce(targetContext);
+                    }
+                }
+        );
+        XposedHelpers.findAndHookMethod(
+                Activity.class,
+                "onCreate",
+                Bundle.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        Activity activity = (Activity) param.thisObject;
+                        Intent intent = activity.getIntent();
+                        XposedBridge.log("ArcDark: Activity.onCreate called, activity="
+                                + activity.getClass().getName());
+                        installOnce(activity, ArcDarkRuntimeControl.read(activity, intent));
                     }
                 }
         );
     }
 
-    private static synchronized void installOnce(Context targetContext) {
+    private static synchronized void installOnce(Context targetContext, ArcDarkControl.Control control) {
         if (installed) {
             return;
         }
@@ -78,15 +93,55 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
             AssetOverrideIndex index = AssetOverrideIndex.load(moduleAssets);
             XposedBridge.log("ArcDark: index loaded, count=" + index.size());
 
+            File root = ArcDarkPaths.targetRoot(targetContext);
+            XposedBridge.log("ArcDark: control injection="
+                    + control.injectionEnabled
+                    + ", activePack="
+                    + control.activePackId
+                    + ", root="
+                    + root);
+
+            if (!control.injectionEnabled) {
+                TestPackSeeder.ensureTestPackAsync(moduleAssets, root, index);
+                installed = true;
+                XposedBridge.log("ArcDark: injection disabled by control; hooks not installed");
+                return;
+            }
+
+            AssetOverrideIndex activeIndex = index;
             BundledAssetProvider bundled = new BundledAssetProvider(moduleAssets, targetContext, index);
-            provider = new CompositeAssetProvider(new ExternalAssetProvider(), bundled);
-            XposedBridge.log("ArcDark: provider initialized");
+            AssetProvider activeProvider = bundled;
+            String activePackId = ArcDarkConstants.DEFAULT_PACK_ID;
+
+            if (ArcDarkConstants.TEST_PACK_ID.equals(control.activePackId)) {
+                try {
+                    File packDir = TestPackSeeder.ensureTestPack(moduleAssets, root, index);
+                    FilePackProvider filePackProvider = new FilePackProvider(packDir, index);
+                    preflightFilePack(filePackProvider, index);
+                    activeProvider = filePackProvider;
+                    activePackId = ArcDarkConstants.TEST_PACK_ID;
+                    XposedBridge.log("ArcDark: using file pack " + packDir);
+                } catch (Throwable throwable) {
+                    XposedBridge.log("ArcDark: unable to use test_pkg; falling back to default");
+                    XposedBridge.log(throwable);
+                }
+            } else {
+                TestPackSeeder.ensureTestPackAsync(moduleAssets, root, index);
+                XposedBridge.log("ArcDark: using bundled default pack");
+            }
+
+            provider = activeProvider;
+            XposedBridge.log("ArcDark: provider initialized for " + activePackId);
 
             attachModuleAssetPath(targetContext);
 
-            NativeBridge.install(modulePath, bundled, index);
-            NativeBridge.refreshHooks("initial");
-            scheduleNativeRefreshes();
+            boolean nativeInstalled = NativeBridge.install(modulePath, activeProvider, activeIndex);
+            if (nativeInstalled) {
+                NativeBridge.refreshHooks("initial");
+                scheduleNativeRefreshes();
+            } else {
+                XposedBridge.log("ArcDark: native hook unavailable; Java AssetManager hooks remain active");
+            }
 
             hookAssetOpen();
             XposedBridge.log("ArcDark: hook AssetManager.open(String) installed");
@@ -96,11 +151,22 @@ public final class ArcDarkModule implements IXposedHookLoadPackage, IXposedHookZ
             XposedBridge.log("ArcDark: hook AssetManager.openFd(String) installed");
 
             installed = true;
-            XposedBridge.log("ArcDark: installed " + index.size() + " asset overrides for "
-                    + TARGET_PACKAGE + " from " + modulePath);
+            XposedBridge.log("ArcDark: installed Java hooks for " + activeIndex.size()
+                    + " asset overrides for "
+                    + ArcDarkConstants.TARGET_PACKAGE
+                    + ", provider="
+                    + activePackId
+                    + ", native="
+                    + nativeInstalled);
         } catch (Throwable throwable) {
             XposedBridge.log("ArcDark: failed to install hooks");
             XposedBridge.log(throwable);
+        }
+    }
+
+    private static void preflightFilePack(FilePackProvider provider, AssetOverrideIndex index) throws Exception {
+        for (AssetOverride override : index.entries()) {
+            provider.materialize(override.assetPath);
         }
     }
 

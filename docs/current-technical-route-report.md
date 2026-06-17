@@ -1,251 +1,123 @@
-# Arc Dark 当前技术路线与失败复盘
+# Arc Dark MVP 当前技术路线
 
 ## 结论摘要
 
-当前模块未正常生效，至少存在一个已确认的配置错误和若干运行时风险。
+Arc Dark 的 MVP 架构已经完成并通过设备验证。当前路线保持官方 Arcaea 包 `moe.low.arc` 不变，通过 LSPosed 注入目标进程，在运行时替换 348 个素材。
 
-最明确的问题是 **LSPosed 推荐作用域声明方式错误**。当前 APK 内存在 `assets/xposed_scope`，内容为 `moe.low.arc`，但 LSPosed 官方 Wiki 描述的推荐作用域机制是 `AndroidManifest.xml` 中的 `meta-data android:name="xposedscope"`，可通过 `android:value` 或 `android:resource` 声明目标包名。当前 manifest 没有 `xposedscope`，因此“推荐作用域看不见”是符合现状的。
+当前已验证能力：
 
-这也会影响材质替换测试：如果 LSPosed 没有手动勾选 `moe.low.arc`，模块不会注入 Arcaea 进程，Java hook 和 native hook 都不会运行，表现就是修改完全不生效。
-
-参考：
-
-- LSPosed Module Scope Wiki: https://github.com/LSPosed/LSPosed/wiki/Module-Scope
-- LSPosed How to use it: https://github.com/LSPosed/LSPosed/wiki/How-to-use-it
+- 桌面入口和控制台式 UI 可用。
+- 注入开关可控制是否安装 hook。
+- 素材包列表包含 `<default>` 和 `test_pkg`。
+- `<default>` 使用模块 APK 内置素材。
+- `test_pkg` 会复制为目标进程可读的真实文件包。
+- native map 可以指向 `packs/test_pkg` 下的文件。
+- 进入谱面加载后已确认 `ArcDarkNative: asset hit` 指向 `packs/test_pkg`。
+- 关闭注入后不会注册 native map，也不会安装 Java/native asset hook。
 
 ## 当前工程状态
 
-模块工程位置：
+- 模块包名：`dev.arc.assets`
+- 目标包名 / LSPosed 作用域：`moe.low.arc`
+- 版本：`0.1.5 (5)`
+- native ABI：`arm64-v8a`, `armeabi-v7a`
+- 覆盖素材数量：348
+- 构建脚本：`scripts/Build-Debug.ps1`
+- 推荐作用域声明：`AndroidManifest.xml` 中的 `xposedscope=moe.low.arc`
+- 入口：legacy Xposed `assets/xposed_init = dev.arc.assets.ArcDarkModule`
 
-`C:\Users\comma\Documents\Arc_dark`
+## 运行架构
 
-当前构建产物：
+UI 只运行在 `dev.arc.assets` 进程中，用于查看状态、切换注入开关、选择素材包、复制诊断信息和启动 Arcaea。
 
-`C:\Users\comma\Documents\Arc_dark\app\build\outputs\apk\debug\app-debug.apk`
+运行目录由目标进程负责读写：
 
-当前 APK 静态状态：
+```text
+/sdcard/Android/media/moe.low.arc/ArcDark/
+```
 
-- APK 包名：`dev.arc.assets`
-- LSPosed legacy 入口：`assets/xposed_init = dev.arc.assets.ArcDarkModule`
-- 当前 scope 文件：`assets/xposed_scope = moe.low.arc`
-- manifest 中 Xposed legacy metadata：
-  - `xposedmodule=true`
-  - `xposeddescription=@string/xposed_description`
-  - `xposedminversion=93`
-- manifest 中缺失：`xposedscope`
-- 内置素材覆盖项：348 个
-- native 库：
-  - `lib/arm64-v8a/libarcdarkhook.so`
-  - `lib/armeabi-v7a/libarcdarkhook.so`
-  - 两个 ABI 都包含 `libc++_shared.so`
-- `extractNativeLibs=true`，因此模块 native lib 会被解包，`System.load()` 有可用路径。
+目录结构：
 
-## 失败经过
+```text
+ArcDark/
+  control.json
+  packs/
+    test_pkg/
+      pack.json
+      arc_overrides/index.json
+      arc_overrides/summary.json
+      img/...
+      models/...
+```
 
-### 1. 改包分析阶段
+控制流：
 
-原始输入：
+1. UI 保存本地配置到 `dev.arc.assets/files/control.json`。
+2. 用户点击 `Open Arcaea`。
+3. UI 通过启动 intent extras 传递 `injection_enabled` 和 `active_pack_id`。
+4. `ArcDarkModule` 在目标 Activity `onCreate` 前读取 extras。
+5. 目标进程写入 `/sdcard/Android/media/moe.low.arc/ArcDark/control.json`。
+6. 后续普通重启 Arcaea 时，模块直接读取目标侧 `control.json`。
 
-- 官方原包：`arcaea_6.14.12c.apk`
-- 改包：`fixed.apk`
+这个设计避免了 `dev.arc.assets` 私有目录跨包读取失败，也不需要 `READ_EXTERNAL_STORAGE`、`WRITE_EXTERNAL_STORAGE` 或 `MANAGE_EXTERNAL_STORAGE`。
 
-发现：
+## 素材包与 Hook 路线
 
-- 官方原包包名是 `moe.low.arc`，版本 `6.14.12c`。
-- `fixed.apk` 包名是 `moe.low.ard`，版本 `6.14.11c`。
-- fixed 不是同版本同包名的纯素材包，而是跨版本、改包名、重签名产物。
-- 两包差异集中在 `assets/`，但也存在 `AndroidManifest.xml`、`classes2.dex`、`resources.arsc`、`lib/*.so` 差异。
+`<default>` 是模块 APK 内置素材包。目标进程启动时直接从模块 APK 读取索引和素材，必要时 materialize 到目标进程可用路径。
 
-第一版计划选择只迁移素材，不复制改包名、dex、resources、so 差异。
+`test_pkg` 是文件素材包。首次需要时，目标进程从模块 APK 内置素材复制生成完整目录。已验证文件数为 351，即 348 个素材文件加 `pack.json`、`index.json`、`summary.json`。
 
-### 2. Java-only 版本
+Hook 路线：
 
-第一版模块做了这些事：
-
-- 保持官方目标包 `moe.low.arc`
-- 内置 348 个素材覆盖项
-- hook Java `AssetManager.open(String)`、`AssetManager.open(String, int)`、`AssetManager.openFd(String)`
-- 尝试 `AssetManager.addAssetPath(modulePath)` 让模块 assets 被目标进程看到
-
-失败原因分析：
-
-- Arcaea 使用 Cocos2d-x。
-- 静态分析 `libcocos2dcpp.so` 发现它导入 `AAssetManager_open`、`AAsset_read`、`AAsset_getLength`、`AAsset_close`。
-- Cocos native 层可以直接通过 Android native asset API 读取 APK assets，绕过 Java `AssetManager.open` hook。
-- `addAssetPath()` 是追加资源路径，不是覆盖原 APK assets；同路径素材通常仍优先命中原包。
-
-因此 Java-only 方案不足以替换 Cocos native 读取的材质。
-
-### 3. Native hook MVP 版本
-
-第二版模块新增了 native hook：
-
-- 新增 `NativeBridge`
-- 新增 `libarcdarkhook.so`
-- 通过 xHook 注册 PLT hook
-- hook 目标：
+- 保留 Java `AssetManager.open(String)`、`open(String,int)`、`openFd(String)` 兜底。
+- native 库 `libarcdarkhook.so` 使用 xHook hook Cocos native asset API：
   - `AAssetManager_open`
   - `AAsset_read`
   - `AAsset_getLength`
   - `AAsset_close`
-- 启动时把 348 个内置素材落盘到目标 app cache
-- 命中路径时返回 fake `AAsset*`，后续 `read/getLength/close` 识别 fake pointer 并读取落盘素材
-- 未命中路径回退原始 native API
+- 不 hook `System.load` 或 `System.loadLibrary`。
+- native hook 安装后执行 `xhook_refresh()`，并保留延迟刷新：initial、250ms、1000ms、3000ms、7000ms。
 
-构建验证通过：
+## 验证证据
 
-- `:app:assembleDebug` 成功
-- APK 包名仍为 `dev.arc.assets`
-- APK 内包含两套 ABI native lib
-- APK 签名 v1/v2 验证通过
+最后一轮设备验证结果（2026-06-17）：
 
-设备测试结果：
+- `test_pkg` 已生成在 `/sdcard/Android/media/moe.low.arc/ArcDark/packs/test_pkg/`。
+- `find .../test_pkg -type f | wc -l` 返回 `351`。
+- 选择 `test_pkg` 并启动 Arcaea 后，日志出现：
+  - `ArcDark: using file pack /storage/emulated/0/Android/media/moe.low.arc/ArcDark/packs/test_pkg`
+  - `ArcDark: native source sample ... -> /storage/emulated/0/Android/media/moe.low.arc/ArcDark/packs/test_pkg/...`
+  - `ArcDark: native install registered 348 assets`
+- 从标题页进入主菜单，点击开始游戏并进入当前曲目加载后，日志确认真实素材命中：
+  - `ArcDarkNative: asset hit #1: img/track.png -> /storage/emulated/0/Android/media/moe.low.arc/ArcDark/packs/test_pkg/img/track.png`
+  - `ArcDarkNative: asset hit #5: img/note.png -> /storage/emulated/0/Android/media/moe.low.arc/ArcDark/packs/test_pkg/img/note.png`
+  - `ArcDarkNative: asset hit #11: models/tap_l.png -> /storage/emulated/0/Android/media/moe.low.arc/ArcDark/packs/test_pkg/models/tap_l.png`
+- 关闭注入并启动 Arcaea 后，日志出现：
+  - `ArcDark: injection disabled by control; hooks not installed`
+  - 没有 native install 注册日志。
+- 最终 UI 截图保存在 `docs/evidence/arc-dark-final-ui.png`。
 
-- 模块仍无法正常运行
-- 修改不生效
-- 推荐作用域看不见
+## 构建与回归
 
-其中“推荐作用域看不见”已有明确根因：使用了错误/非官方的推荐作用域声明位置。
-
-## 成因分析
-
-### P0：推荐作用域声明错误
-
-当前工程使用：
-
-```text
-app/src/main/assets/xposed_scope
-```
-
-但 LSPosed 官方推荐作用域声明方式是 manifest metadata：
-
-```xml
-<meta-data
-    android:name="xposedscope"
-    android:value="moe.low.arc" />
-```
-
-或者：
-
-```xml
-<meta-data
-    android:name="xposedscope"
-    android:resource="@array/scope" />
-```
-
-当前 APK 没有 `xposedscope`，因此 LSPosed Manager 不显示推荐作用域是预期结果。
-
-影响：
-
-- 用户必须手动选择 `moe.low.arc`。
-- 如果没有手动选择，模块不会进入 Arcaea 进程。
-- 模块不进入进程时，所有 hook 都不会运行，材质替换必然不生效。
-
-### P1：当前测试无法证明 native hook 已进入 Arcaea 进程
-
-报告中没有看到设备侧 LSPosed/Xposed 日志，例如：
-
-- `ArcDark: loaded native hook library`
-- `ArcDark: native install registered 348 assets`
-- `ArcDark: native refresh(...) result=...`
-- `ArcDarkNative: asset hit #...`
-
-如果这些日志不存在，优先判断不是 native hook 逻辑错，而是模块没有被 LSPosed 注入到 `moe.low.arc`。
-
-### P1：legacy Xposed metadata 与 LSPosed scope metadata 混用
-
-当前模块入口仍使用 legacy Xposed 机制：
-
-- `assets/xposed_init`
-- manifest `xposedmodule`
-- 实现 `IXposedHookLoadPackage`
-
-这条路线仍可用，但推荐作用域不能只依赖 `assets/xposed_scope`。需要补 manifest `xposedscope`。
-
-如果后续迁移到现代 libxposed API，则入口和 scope 文件位置会变成另一套机制，例如 `META-INF/xposed/...`，不能和当前 legacy 写法混用。
-
-### P2：native hook 仍有运行时不确定性
-
-即使 scope 修好并手动/自动注入成功，native hook 仍有这些风险：
-
-- `xhook_register` 当前只匹配 `.*libcocos2dcpp\.so$`，如果设备上的 linker 路径命名不符合该正则，hook 可能没有打到目标库。
-- 当前只 hook `System.loadLibrary("cocos2dcpp")` 后刷新。如果游戏使用 `System.load()`、其他加载路径，或者 `libcocos2dcpp.so` 在模块初始化前已加载，刷新时机可能不稳定。
-- 当前 fake `AAsset*` 方案只覆盖了静态分析发现的四个函数。原包 `libcocos2dcpp.so` 符号表目前只导入 `AAssetManager_open/read/getLength/close`，所以 MVP 设计是合理的；但如果不同版本或设备路径调用更多 `AAsset_*` API，需要补 hook。
-- 当前没有 hook `AAssetManager_openDir`，因此 60 个新增素材不会出现在目录枚举里。已有同路径替换的 288 个素材理论上不受影响。
-- `fixed.apk` 是 `6.14.11c`，官方包是 `6.14.12c`。跨版本素材不保证一定会被当前官方版本请求。
-
-### P2：路径命中需要设备日志确认
-
-当前索引同时注册：
-
-- `assets/img/...`
-- `img/...`
-
-这覆盖了主要路径形态。但如果 Cocos 请求路径存在其他前缀、大小写、资源包内部虚拟路径，当前匹配不会命中。需要通过设备日志里 `asset hit` 或额外 path-probe 日志确认真实请求路径。
-
-## 当前技术路线评价
-
-当前方向仍然合理，但需要先修正 LSPosed 基础元数据，否则所有运行时分析都不可靠。
-
-路线优点：
-
-- 不修改官方 APK。
-- 保留官方包名和签名链。
-- 素材只在运行时替换。
-- Java hook 和 native hook 分层，覆盖了 Cocos 主要 asset 读取方式。
-
-路线问题：
-
-- 推荐作用域配置错误，导致用户侧无法看到推荐范围。
-- 目前没有设备日志闭环，无法确认模块是否注入、native 库是否加载、xHook 是否命中。
-- native hook 只覆盖 assets API，不覆盖文件系统、OBB、目录枚举和 fixed 中的非素材逻辑差异。
-- 素材来源跨版本，可能导致“测试的那个画面不请求被覆盖路径”。
-
-## 建议的下一步
-
-### 立即修复
-
-1. 在 manifest 中新增：
-
-```xml
-<meta-data
-    android:name="xposedscope"
-    android:value="moe.low.arc" />
-```
-
-2. 保留 `assets/xposed_scope` 也可以，但不要把它当作 LSPosed 推荐作用域的可靠来源。
-
-3. 重建 APK 后确认：
+构建：
 
 ```powershell
-aapt dump xmltree app-debug.apk AndroidManifest.xml
+powershell -ExecutionPolicy Bypass -File .\scripts\Build-Debug.ps1
 ```
 
-必须能看到 `xposedscope`。
+核心回归检查：
 
-### 下一轮设备测试必须收集
+- 安装 debug APK 后能解析并启动 `dev.arc.assets/.MainActivity`。
+- UI 中显示注入开关、`<default>`、`test_pkg`、刷新、复制诊断、Open Arcaea。
+- `Open Arcaea` 能把 UI 当前配置应用到目标侧 `ArcDark/control.json`。
+- `<default>` 启用时注册 348 个素材。
+- `test_pkg` 启用时 native source sample 指向 `packs/test_pkg`。
+- 进入谱面加载时至少出现 `img/track.png`、`img/note.png`、`models/tap_l.png` 的 native asset hit。
+- 注入关闭时不安装 hook。
 
-启动 Arcaea 后抓取 LSPosed/Xposed 日志，确认是否出现：
+## 后续开发注意事项
 
-```text
-ArcDark: installed 348 asset overrides for moe.low.arc
-ArcDark: loaded native hook library ...
-ArcDark: native install registered 348 assets
-ArcDark: native refresh(initial) result=...
-ArcDarkNative: asset hit #...
-```
-
-判断方式：
-
-- 没有 `ArcDark:`：模块未注入，优先查 scope/启用状态。
-- 有 `ArcDark:` 但没有 native install：native 库加载或 materialize 失败。
-- 有 native install 但没有 `asset hit`：hook 未命中目标 so，或路径不匹配。
-- 有 `asset hit` 但画面不变：命中素材不是当前画面使用的材质，或渲染层使用了其他缓存/资源路径。
-
-### 后续增强
-
-- 增加 native path-probe：在未命中的 `AAssetManager_open` 前若干次调用中记录请求路径，但要限量避免刷日志。
-- 补 hook `AAssetManager_openDir`，解决新增素材目录枚举不可见问题。
-- 增加版本锁定提示：当前素材基于 `fixed.apk` 的 `6.14.11c`，目标官方包是 `6.14.12c`。
-- 如果 LSPosed 版本较新且 legacy API 兼容性不稳定，再考虑迁移现代 libxposed API，而不是继续混用 legacy 入口和现代 scope 文件。
-
+- 低版本 Android 适配暂缓，当前优先现代 Android 和现有测试设备。
+- 不要恢复 `System.load` / `System.loadLibrary` hook；这条路线曾引入 native 库加载回归。
+- 外部素材包扩展应复用当前 `packs/<packId>/` 结构和目标侧 `control.json`，避免跨包私有目录读取。
+- `logs/` 和 `dist/` 是本地产物目录，默认忽略；需要证据时只整理精简摘要到 `docs/evidence/`。

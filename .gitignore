@@ -3,6 +3,6 @@ build/
 app/build/
 app/.cxx/
 local.properties
-codex.md
+/codex.md
 dist/
 logs/

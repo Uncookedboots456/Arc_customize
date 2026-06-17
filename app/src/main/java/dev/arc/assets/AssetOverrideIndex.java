@@ -6,6 +6,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
@@ -23,17 +25,26 @@ final class AssetOverrideIndex {
     }
 
     static AssetOverrideIndex load(AssetManager moduleAssets) throws Exception {
-        String json = readUtf8(moduleAssets.open(INDEX_ASSET));
+        return load(moduleAssets.open(INDEX_ASSET));
+    }
+
+    static AssetOverrideIndex load(File indexFile) throws Exception {
+        return load(new FileInputStream(indexFile));
+    }
+
+    static AssetOverrideIndex load(InputStream input) throws Exception {
+        String json = readUtf8(input);
         JSONObject root = new JSONObject(json);
         JSONArray entries = root.getJSONArray("entries");
         Map<String, AssetOverride> loaded = new HashMap<>();
 
         for (int i = 0; i < entries.length(); i++) {
             JSONObject item = entries.getJSONObject(i);
-            String assetPath = normalize(item.getString("assetPath"));
+            String assetPath = normalizeIndexPath(item.getString("assetPath"), "assetPath");
+            String modulePath = normalizeIndexPath(item.getString("modulePath"), "modulePath");
             AssetOverride override = new AssetOverride(
                     assetPath,
-                    item.getString("modulePath"),
+                    modulePath,
                     item.getLong("size"),
                     item.getString("sha256"),
                     item.optBoolean("materialize", true)
@@ -68,6 +79,28 @@ final class AssetOverrideIndex {
         String value = path == null ? "" : path.replace('\\', '/');
         while (value.startsWith("/")) {
             value = value.substring(1);
+        }
+        return value;
+    }
+
+    private static String normalizeIndexPath(String path, String fieldName) {
+        if (path == null) {
+            throw new IllegalArgumentException(fieldName + " is missing");
+        }
+
+        String value = path.replace('\\', '/');
+        if (value.length() == 0) {
+            throw new IllegalArgumentException(fieldName + " is empty");
+        }
+        if (value.startsWith("/") || value.indexOf(':') != -1) {
+            throw new IllegalArgumentException(fieldName + " must be relative: " + path);
+        }
+
+        String[] segments = value.split("/", -1);
+        for (String segment : segments) {
+            if (segment.length() == 0 || "..".equals(segment)) {
+                throw new IllegalArgumentException(fieldName + " contains unsafe segment: " + path);
+            }
         }
         return value;
     }

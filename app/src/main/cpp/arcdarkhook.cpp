@@ -181,9 +181,9 @@ void hook_AAsset_close(AAsset *asset) {
     delete fake;
 }
 
-void register_hooks_once() {
+jint register_hooks_once() {
     if (g_registered) {
-        return;
+        return 1;
     }
 
     xhook_enable_debug(0);
@@ -210,17 +210,22 @@ void register_hooks_once() {
             reinterpret_cast<void *>(hook_AAsset_close),
             reinterpret_cast<void **>(&orig_AAsset_close));
 
-    g_registered = true;
     LOGI("xhook register results open=%d read=%d length=%d close=%d",
          open_result,
          read_result,
          length_result,
          close_result);
+    if (open_result != 0 || read_result != 0 || length_result != 0 || close_result != 0) {
+        LOGE("xhook register failed");
+        return 0;
+    }
+    g_registered = true;
+    return 1;
 }
 
 } // namespace
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_arc_assets_NativeBridge_nativeInstall(
         JNIEnv *env,
         jclass,
@@ -230,7 +235,7 @@ Java_dev_arc_assets_NativeBridge_nativeInstall(
     jsize file_count = env->GetArrayLength(file_paths);
     if (asset_count != file_count) {
         LOGE("nativeInstall array length mismatch assets=%d files=%d", asset_count, file_count);
-        return;
+        return 0;
     }
 
     std::unordered_map<std::string, std::string> overrides;
@@ -239,8 +244,24 @@ Java_dev_arc_assets_NativeBridge_nativeInstall(
     for (jsize i = 0; i < asset_count; i++) {
         auto asset_string = static_cast<jstring>(env->GetObjectArrayElement(asset_paths, i));
         auto file_string = static_cast<jstring>(env->GetObjectArrayElement(file_paths, i));
+        if (asset_string == nullptr || file_string == nullptr) {
+            LOGE("nativeInstall received null path at index=%d", i);
+            return 0;
+        }
         const char *asset_chars = env->GetStringUTFChars(asset_string, nullptr);
         const char *file_chars = env->GetStringUTFChars(file_string, nullptr);
+        if (asset_chars == nullptr || file_chars == nullptr) {
+            LOGE("nativeInstall failed to read path at index=%d", i);
+            if (asset_chars != nullptr) {
+                env->ReleaseStringUTFChars(asset_string, asset_chars);
+            }
+            if (file_chars != nullptr) {
+                env->ReleaseStringUTFChars(file_string, file_chars);
+            }
+            env->DeleteLocalRef(asset_string);
+            env->DeleteLocalRef(file_string);
+            return 0;
+        }
 
         std::string asset_path = normalize_path(asset_chars);
         std::string file_path(file_chars);
@@ -260,16 +281,21 @@ Java_dev_arc_assets_NativeBridge_nativeInstall(
         g_miss_logs = 0;
     }
 
-    register_hooks_once();
+    if (register_hooks_once() != 1) {
+        return 0;
+    }
     int refresh_result = xhook_refresh(0);
     LOGI("nativeInstall mapped %d assets (%zu lookup keys), refresh=%d",
          asset_count,
          g_overrides.size(),
          refresh_result);
+    return 1;
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_arc_assets_NativeBridge_nativeRefreshHooks(JNIEnv *, jclass) {
-    register_hooks_once();
+    if (register_hooks_once() != 1) {
+        return -1;
+    }
     return xhook_refresh(0);
 }

@@ -17,13 +17,13 @@ final class NativeBridge {
     private NativeBridge() {
     }
 
-    static synchronized void install(
+    static synchronized boolean install(
             String modulePath,
-            BundledAssetProvider bundledProvider,
+            AssetProvider assetProvider,
             AssetOverrideIndex index
     ) {
         if (installed) {
-            return;
+            return true;
         }
 
         try {
@@ -32,20 +32,32 @@ final class NativeBridge {
             List<String> assetPaths = new ArrayList<>(index.size());
             List<String> filePaths = new ArrayList<>(index.size());
             for (AssetOverride override : index.entries()) {
-                File file = bundledProvider.materialize(override.assetPath);
+                File file = assetProvider.materialize(override.assetPath);
                 assetPaths.add(override.assetPath);
                 filePaths.add(file.getAbsolutePath());
             }
+            if (!filePaths.isEmpty()) {
+                XposedBridge.log("ArcDark: native source sample "
+                        + assetPaths.get(0)
+                        + " -> "
+                        + filePaths.get(0));
+            }
 
-            nativeInstall(
+            int nativeResult = nativeInstall(
                     assetPaths.toArray(new String[0]),
                     filePaths.toArray(new String[0])
             );
+            if (nativeResult != 1) {
+                XposedBridge.log("ArcDark: native install rejected map, result=" + nativeResult);
+                return false;
+            }
             installed = true;
             XposedBridge.log("ArcDark: native install registered " + assetPaths.size() + " assets");
+            return true;
         } catch (Throwable throwable) {
             XposedBridge.log("ArcDark: native install failed");
             XposedBridge.log(throwable);
+            return false;
         }
     }
 
@@ -108,7 +120,7 @@ final class NativeBridge {
         throw new IllegalStateException("Native hook library not found next to " + modulePath);
     }
 
-    private static native void nativeInstall(String[] assetPaths, String[] filePaths);
+    private static native int nativeInstall(String[] assetPaths, String[] filePaths);
 
     private static native int nativeRefreshHooks();
 }
