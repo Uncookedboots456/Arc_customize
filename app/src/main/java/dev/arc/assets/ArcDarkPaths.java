@@ -39,7 +39,19 @@ final class ArcDarkPaths {
     }
 
     static File packDir(File root, String packId) {
-        return new File(packsDir(root), packId);
+        File packsDir = packsDir(root);
+        try {
+            File canonicalPacksDir = packsDir.getCanonicalFile();
+            File canonicalPackDir = new File(canonicalPacksDir, packId).getCanonicalFile();
+            String packsPath = canonicalPacksDir.getPath();
+            String packPath = canonicalPackDir.getPath();
+            if (packPath.equals(packsPath) || !packPath.startsWith(packsPath + File.separator)) {
+                throw new IllegalStateException("Pack path escapes packs root: " + packId);
+            }
+            return canonicalPackDir;
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException("Unable to resolve pack path: " + packId, exception);
+        }
     }
 
     static String displayPath(File file) {

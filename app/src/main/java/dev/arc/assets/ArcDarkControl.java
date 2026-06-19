@@ -116,6 +116,8 @@ final class ArcDarkControl {
         }
         if (ArcDarkConstants.DEFAULT_PACK_ID.equals(packId)
                 || ArcDarkConstants.TEST_PACK_ID.equals(packId)
+                || ".".equals(packId)
+                || "..".equals(packId)
                 || packId.endsWith(".tmp")
                 || packId.endsWith(".tmp-import")
                 || packId.endsWith(".backup-import")) {
