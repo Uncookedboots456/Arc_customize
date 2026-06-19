@@ -17,7 +17,7 @@ public final class PackPathSecurityTest {
     public void externalPackIdRejectsDirectoryAliases() {
         assertFalse(ArcDarkControl.isExternalPackId("."));
         assertFalse(ArcDarkControl.isExternalPackId(".."));
-        assertEquals(ArcDarkConstants.DEFAULT_PACK_ID, ArcDarkControl.sanitizePackId(".."));
+        assertEquals("", ArcDarkControl.sanitizePackId(".."));
     }
 
     @Test(expected = IllegalStateException.class)

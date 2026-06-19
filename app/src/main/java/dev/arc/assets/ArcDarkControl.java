@@ -4,12 +4,7 @@ import android.content.Context;
 
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -25,7 +20,7 @@ final class ArcDarkControl {
     }
 
     static Control defaults() {
-        return new Control(true, Collections.singletonList(ArcDarkConstants.DEFAULT_PACK_ID));
+        return new Control(true, Collections.<String>emptyList());
     }
 
     static Control readLocal(Context context) {
@@ -47,7 +42,7 @@ final class ArcDarkControl {
         if (!file.isFile()) {
             return defaults();
         }
-        return readJson(readUtf8(new FileInputStream(file)));
+        return readJson(ArcDarkFileOps.readUtf8(file));
     }
 
     static Control readJson(String json) throws Exception {
@@ -55,10 +50,17 @@ final class ArcDarkControl {
         List<String> packOrder;
         if (root.has(KEY_ACTIVE_PACK_ORDER)) {
             packOrder = sanitizePackOrder(root.optJSONArray(KEY_ACTIVE_PACK_ORDER));
+            if (packOrder.isEmpty() && root.has(KEY_ACTIVE_PACK_ID)) {
+                String packId = sanitizePackId(root.optString(KEY_ACTIVE_PACK_ID, ""));
+                if (packId.length() > 0) {
+                    packOrder = Collections.singletonList(packId);
+                }
+            }
         } else {
-            packOrder = Collections.singletonList(
-                    sanitizePackId(root.optString(KEY_ACTIVE_PACK_ID, ArcDarkConstants.DEFAULT_PACK_ID))
-            );
+            String packId = sanitizePackId(root.optString(KEY_ACTIVE_PACK_ID, ""));
+            packOrder = packId.length() == 0
+                    ? Collections.<String>emptyList()
+                    : Collections.singletonList(packId);
         }
         return new Control(
                 root.optBoolean(KEY_INJECTION_ENABLED, true),
@@ -82,9 +84,7 @@ final class ArcDarkControl {
         root.put(KEY_ACTIVE_PACK_ORDER, order);
 
         File tmp = new File(file.getParentFile(), file.getName() + ".tmp");
-        try (FileOutputStream out = new FileOutputStream(tmp)) {
-            out.write(root.toString(2).getBytes(StandardCharsets.UTF_8));
-        }
+        ArcDarkFileOps.writeUtf8(tmp, root.toString(2));
         if (file.exists() && !file.delete()) {
             throw new IllegalStateException("Unable to replace " + file);
         }
@@ -101,12 +101,11 @@ final class ArcDarkControl {
         if (isAllowedPackId(packId)) {
             return packId;
         }
-        return ArcDarkConstants.DEFAULT_PACK_ID;
+        return "";
     }
 
     static boolean isAllowedPackId(String packId) {
-        return ArcDarkConstants.DEFAULT_PACK_ID.equals(packId)
-                || ArcDarkConstants.TEST_PACK_ID.equals(packId)
+        return ArcDarkConstants.TEST_PACK_ID.equals(packId)
                 || isExternalPackId(packId);
     }
 
@@ -164,17 +163,6 @@ final class ArcDarkControl {
         return sanitizePackOrder(values);
     }
 
-    private static String readUtf8(InputStream input) throws Exception {
-        try (InputStream in = input; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-            return new String(out.toByteArray(), StandardCharsets.UTF_8);
-        }
-    }
-
     private static void repairPrivateStorage(Context context) {
         restrictFileToOwner(new File(context.getApplicationInfo().dataDir), true);
         restrictFileToOwner(context.getFilesDir(), true);
@@ -220,7 +208,10 @@ final class ArcDarkControl {
         }
 
         Control withActivePackId(String packId) {
-            return new Control(injectionEnabled, Collections.singletonList(sanitizePackId(packId)));
+            String sanitized = sanitizePackId(packId);
+            return sanitized.length() == 0
+                    ? new Control(injectionEnabled, Collections.<String>emptyList())
+                    : new Control(injectionEnabled, Collections.singletonList(sanitized));
         }
 
         Control withActivePackOrder(List<String> packOrder) {

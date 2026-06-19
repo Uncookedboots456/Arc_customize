@@ -7,12 +7,38 @@ android {
     compileSdk 35
     ndkVersion "27.2.12479018"
 
+    def localSigningProperties = new Properties()
+    def localSigningPropertiesFile = rootProject.file("local.properties")
+    if (localSigningPropertiesFile.isFile()) {
+        localSigningPropertiesFile.withInputStream { stream ->
+            localSigningProperties.load(stream)
+        }
+    }
+
+    def signingValue = { String propertyName, String envName ->
+        def projectValue = project.findProperty(propertyName)
+        if (projectValue) {
+            return projectValue
+        }
+        def localValue = localSigningProperties.getProperty(propertyName)
+        if (localValue) {
+            return localValue
+        }
+        return System.getenv(envName)
+    }
+
+    def releaseStoreFile = signingValue("arcCustomizeStoreFile", "ARC_CUSTOMIZE_STORE_FILE")
+    def releaseStorePassword = signingValue("arcCustomizeStorePassword", "ARC_CUSTOMIZE_STORE_PASSWORD")
+    def releaseKeyAlias = signingValue("arcCustomizeKeyAlias", "ARC_CUSTOMIZE_KEY_ALIAS")
+    def releaseKeyPassword = signingValue("arcCustomizeKeyPassword", "ARC_CUSTOMIZE_KEY_PASSWORD")
+    def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
     defaultConfig {
         applicationId "dev.arc.assets"
         minSdk 23
         targetSdk 29
-        versionCode 6
-        versionName "0.2.0"
+        versionCode 7
+        versionName "0.2.1"
 
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a"
@@ -28,6 +54,25 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
     }
 
     buildFeatures {
@@ -51,4 +96,6 @@ android {
 dependencies {
     compileOnly "de.robv.android.xposed:api:82"
     implementation "dev.rikka.ndk.thirdparty:xhook:1.2.0"
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.json:json:20240303"
 }

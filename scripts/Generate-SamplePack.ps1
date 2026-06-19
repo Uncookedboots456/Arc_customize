@@ -51,11 +51,17 @@ if (Test-Path -LiteralPath $outputFull) {
     Remove-Item -LiteralPath $outputFull -Force
 }
 
-$packJson = [pscustomobject]@{
+$packJson = [ordered]@{
     formatVersion = 1
     id = "sample_pack"
     name = "Arc Dark Sample Pack"
+    version = "1.0"
     description = "Small import test pack generated from bundled Arc Dark assets."
+    author = "Arc Dark"
+    cover = "cover.png"
+    Change = [ordered]@{
+        "Default Fonts" = "fonts"
+    }
 } | ConvertTo-Json -Depth 4
 
 $assetsRoot = Join-Path $workspaceRoot "app\src\main\assets"
@@ -68,6 +74,7 @@ try {
     )
     try {
         Add-ZipTextEntry $archive "pack.json" $packJson
+        Add-ZipFileEntry $archive (Join-Path $assetsRoot "img\note.png") "cover.png"
         Add-ZipFileEntry $archive (Join-Path $assetsRoot "img\track.png") "assets/img/track.png"
         Add-ZipFileEntry $archive (Join-Path $assetsRoot "img\note.png") "assets/img/note.png"
         Add-ZipFileEntry $archive (Join-Path $assetsRoot "models\tap_l.png") "assets/models/tap_l.png"

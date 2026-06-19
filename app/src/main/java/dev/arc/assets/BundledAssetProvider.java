@@ -4,10 +4,7 @@ import android.content.Context;
 import android.content.res.AssetManager;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.security.MessageDigest;
 
 final class BundledAssetProvider implements AssetProvider {
     private final AssetManager moduleAssets;
@@ -37,7 +34,9 @@ final class BundledAssetProvider implements AssetProvider {
         File root = new File(targetContext.getCacheDir(), "arc_dark_assets");
         File file = new File(root, override.sha256);
 
-        if (file.isFile() && file.length() == override.size && override.sha256.equals(sha256(file))) {
+        if (file.isFile()
+                && file.length() == override.size
+                && override.sha256.equals(ArcDarkFileOps.sha256(file))) {
             return file;
         }
 
@@ -46,16 +45,9 @@ final class BundledAssetProvider implements AssetProvider {
         }
 
         File tmp = new File(root, override.sha256 + ".tmp");
-        try (InputStream in = moduleAssets.open(override.modulePath);
-             FileOutputStream out = new FileOutputStream(tmp)) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-        }
+        ArcDarkFileOps.copy(moduleAssets.open(override.modulePath), tmp);
 
-        if (tmp.length() != override.size || !override.sha256.equals(sha256(tmp))) {
+        if (tmp.length() != override.size || !override.sha256.equals(ArcDarkFileOps.sha256(tmp))) {
             if (!tmp.delete()) {
                 tmp.deleteOnExit();
             }
@@ -79,21 +71,4 @@ final class BundledAssetProvider implements AssetProvider {
         return override;
     }
 
-    private static String sha256(File file) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        try (InputStream in = new FileInputStream(file)) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                digest.update(buffer, 0, read);
-            }
-        }
-
-        byte[] bytes = digest.digest();
-        StringBuilder hex = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) {
-            hex.append(String.format("%02x", b));
-        }
-        return hex.toString();
-    }
 }

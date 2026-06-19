@@ -5,11 +5,9 @@ import android.content.res.AssetManager;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,7 +33,7 @@ final class AssetOverrideIndex {
     }
 
     static AssetOverrideIndex load(InputStream input) throws Exception {
-        String json = readUtf8(input);
+        String json = ArcDarkFileOps.readUtf8(input);
         JSONObject root = new JSONObject(json);
         JSONArray entries = root.getJSONArray("entries");
         Map<String, AssetOverride> loaded = new HashMap<>();
@@ -127,14 +125,4 @@ final class AssetOverrideIndex {
         return value;
     }
 
-    private static String readUtf8(InputStream input) throws Exception {
-        try (InputStream in = input; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-            return new String(out.toByteArray(), StandardCharsets.UTF_8);
-        }
-    }
 }

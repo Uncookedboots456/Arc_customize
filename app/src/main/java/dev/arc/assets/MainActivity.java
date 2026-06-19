@@ -5,64 +5,60 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.CompoundButton;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 
 public final class MainActivity extends Activity {
-    private static final String INDEX_ASSET = "arc_overrides/index.json";
-    private static final String APPLY_NOTICE =
-            "Use Open Arcaea to apply changes. Later restarts reuse the applied state.";
     private static final int REQUEST_IMPORT_ZIP = 2001;
+    private static final int WIDE_BREAKPOINT_DP = 840;
 
     private TextView injectionStatusValue;
-    private TextView currentPackValue;
     private TextView targetStatusValue;
     private TextView assetCountValue;
     private TextView rootPathValue;
-    private TextView packSummaryValue;
     private TextView restartNoticeValue;
+    private TextView enabledLayersValue;
+    private TextView importedPacksValue;
+    private TextView topLayerValue;
     private Switch injectionSwitch;
-    private LinearLayout packList;
+    private LinearLayout enabledPackList;
+    private LinearLayout disabledPackList;
+    private View packListScrollView;
     private Button openTargetButton;
-    private StatusSnapshot snapshot;
+    private UiStatusSnapshot snapshot;
+    private Palette palette;
     private boolean binding;
+    private boolean chinese = true;
+    private boolean lightTheme;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         ensureControlFile();
-        setContentView(createContentView());
-        refreshStatus();
+        rebuildContent();
     }
 
     @Override
@@ -80,171 +76,295 @@ public final class MainActivity extends Activity {
 
         Uri uri = data.getData();
         if (uri == null) {
-            Toast.makeText(this, "Selected file is unavailable", Toast.LENGTH_SHORT).show();
+            toast(text("selectedUnavailable"));
             return;
         }
 
         try {
             PackManifest manifest = ImportedPackInstaller.readManifest(this, uri);
-            ArcDarkControl.Control next = ArcDarkControl.readLocal(this).withPackAtFront(manifest.id);
+            ArcDarkControl.Control next = PackOrderController.withPackAtFront(
+                    ArcDarkControl.readLocal(this),
+                    manifest.id
+            );
             ArcDarkControl.writeLocal(this, next);
             refreshStatus();
             openTargetApp(uri);
         } catch (Exception exception) {
-            Toast.makeText(this, "Invalid Arc Dark ZIP pack", Toast.LENGTH_SHORT).show();
+            toast(text("invalidZip"));
         }
     }
 
-    private View createContentView() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(Color.parseColor("#0D1017"));
+    private void rebuildContent() {
+        setContentView(createContentView());
+        refreshStatus();
+    }
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(22), dp(22), dp(22), dp(22));
+    private View createContentView() {
+        palette = Palette.forMode(lightTheme);
+        boolean wide = isWideLayout();
+
+        RootScrollView scroll = new RootScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(palette.background);
+
+        LinearLayout root = vertical();
+        int horizontalPadding = wide ? 32 : 22;
+        root.setPadding(dp(horizontalPadding), dp(34), dp(horizontalPadding), dp(24));
         scroll.addView(root, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT
         ));
 
-        root.addView(createHeader());
+        root.addView(createHeader(wide), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        ));
 
-        boolean wide = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE
-                || getResources().getConfiguration().screenWidthDp >= 700;
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         main.setBaselineAligned(false);
-        root.addView(main, withTopMargin(dp(18)));
+        root.addView(main, withTopMargin(dp(24)));
 
         View injectionPanel = createInjectionPanel();
         View packPanel = createPackPanel(wide);
+        scroll.setLockedChild(packListScrollView);
         if (wide) {
             main.addView(injectionPanel, new LinearLayout.LayoutParams(
                     0,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1.1f
+                    0.96f
             ));
             LinearLayout.LayoutParams packParams = new LinearLayout.LayoutParams(
                     0,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                    0.9f
+                    1.04f
             );
-            packParams.leftMargin = dp(14);
+            packParams.leftMargin = dp(18);
             main.addView(packPanel, packParams);
             main.post(() -> alignPanelHeights(injectionPanel, packPanel));
         } else {
             main.addView(injectionPanel);
-            main.addView(packPanel, withTopMargin(dp(14)));
+            main.addView(packPanel, withTopMargin(dp(18)));
         }
 
-        root.addView(createActionPanel(wide), withTopMargin(dp(14)));
+        root.addView(createActionPanel(wide), withTopMargin(dp(18)));
         return scroll;
     }
 
-    private View createHeader() {
+    private View createHeader(boolean wide) {
         LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        header.setGravity(wide ? Gravity.CENTER_VERTICAL : Gravity.START);
 
-        TextView mark = new TextView(this);
-        mark.setText("AD");
-        mark.setTextColor(Color.parseColor("#F4F7FB"));
-        mark.setTypeface(Typeface.DEFAULT_BOLD);
-        mark.setTextSize(19);
-        mark.setGravity(Gravity.CENTER);
-        mark.setBackground(rounded(Color.parseColor("#182331"), Color.parseColor("#2C3E50"), dp(14)));
-        header.addView(mark, new LinearLayout.LayoutParams(dp(56), dp(56)));
-
-        LinearLayout titleBox = new LinearLayout(this);
-        titleBox.setOrientation(LinearLayout.VERTICAL);
-        titleBox.setPadding(dp(14), 0, 0, 0);
-
+        LinearLayout titleBox = vertical();
         TextView title = new TextView(this);
-        title.setText("Arc Dark");
-        title.setTextColor(Color.parseColor("#F4F7FB"));
+        title.setText("Arc customize");
+        title.setTextColor(palette.text);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextSize(27);
+        title.setTextSize(wide ? 34 : 30);
         titleBox.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Asset pack control panel");
-        subtitle.setTextColor(Color.parseColor("#9AA8B6"));
-        subtitle.setTextSize(14);
-        titleBox.addView(subtitle, withTopMargin(dp(2)));
+        subtitle.setText(text("subtitle"));
+        subtitle.setTextColor(palette.muted);
+        subtitle.setTextSize(16);
+        titleBox.addView(subtitle, withTopMargin(dp(4)));
 
         header.addView(titleBox, new LinearLayout.LayoutParams(
-                0,
+                wide ? 0 : LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
+                wide ? 1f : 0f
         ));
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        controls.setGravity(Gravity.START);
+        controls.addView(createControlGroup(text("languageLabel"),
+                createSegmentedControl(
+                        createSegmentButton("EN", !chinese, view -> {
+                            chinese = false;
+                            rebuildContent();
+                        }),
+                        createSegmentButton("中文", chinese, view -> {
+                            chinese = true;
+                            rebuildContent();
+                        })
+                )));
+        LinearLayout.LayoutParams themeParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        if (wide) {
+            themeParams.leftMargin = dp(14);
+        } else {
+            themeParams.topMargin = dp(10);
+        }
+        controls.addView(createControlGroup(text("themeLabel"),
+                createSegmentedControl(
+                        createSegmentButton(text("dark"), !lightTheme, view -> {
+                            lightTheme = false;
+                            rebuildContent();
+                        }),
+                        createSegmentButton(text("light"), lightTheme, view -> {
+                            lightTheme = true;
+                            rebuildContent();
+                        })
+                )), themeParams);
+
+        LinearLayout.LayoutParams controlsParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        if (!wide) {
+            controlsParams.topMargin = dp(18);
+        }
+        header.addView(controls, controlsParams);
         return header;
     }
 
     private View createInjectionPanel() {
         LinearLayout panel = panel();
-        panel.addView(sectionTitle("Injection"));
+        panel.addView(sectionTitle(text("injection")));
+
+        LinearLayout switchCard = new LinearLayout(this);
+        switchCard.setOrientation(LinearLayout.HORIZONTAL);
+        switchCard.setGravity(Gravity.CENTER_VERTICAL);
+        switchCard.setPadding(dp(18), dp(16), dp(18), dp(16));
+        switchCard.setBackground(rounded(palette.surfaceContainer, palette.surfaceContainer, dp(22)));
+
+        LinearLayout copy = vertical();
+        TextView switchTitle = new TextView(this);
+        switchTitle.setText(text("enableInjection"));
+        switchTitle.setTextColor(palette.text);
+        switchTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        switchTitle.setTextSize(23);
+        copy.addView(switchTitle);
+
+        TextView switchHelper = new TextView(this);
+        switchHelper.setText(text("enableHint"));
+        switchHelper.setTextColor(palette.dim);
+        switchHelper.setTextSize(14);
+        copy.addView(switchHelper, withTopMargin(dp(4)));
+        switchCard.addView(copy, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         injectionSwitch = new Switch(this);
-        injectionSwitch.setText("Enable injection");
-        injectionSwitch.setTextColor(Color.parseColor("#F4F7FB"));
-        injectionSwitch.setTextSize(16);
-        injectionSwitch.setPadding(0, dp(8), 0, dp(6));
+        injectionSwitch.setText("");
         injectionSwitch.setOnCheckedChangeListener(this::onInjectionChanged);
-        panel.addView(injectionSwitch);
+        switchCard.addView(injectionSwitch);
+        panel.addView(switchCard, withTopMargin(dp(24)));
 
-        injectionStatusValue = addStatusRow(panel, "State");
-        currentPackValue = addStatusRow(panel, "Pack order");
-        targetStatusValue = addStatusRow(panel, "Target app");
-        assetCountValue = addStatusRow(panel, "Bundled");
+        LinearLayout statusList = vertical();
+        statusList.setBackground(rounded(palette.surface, palette.outlineVariant, dp(22)));
+        injectionStatusValue = addStatusRow(statusList, text("state"));
+        targetStatusValue = addStatusRow(statusList, text("targetApp"));
+        assetCountValue = addStatusRow(statusList, text("difference"));
 
+        LinearLayout pathRow = vertical();
+        pathRow.setPadding(dp(18), dp(14), dp(18), dp(16));
+        TextView runtime = label(text("runtimePath"));
+        pathRow.addView(runtime);
         rootPathValue = bodyText();
-        panel.addView(label("Runtime path"), withTopMargin(dp(12)));
-        panel.addView(rootPathValue, withTopMargin(dp(4)));
+        rootPathValue.setMaxLines(2);
+        rootPathValue.setEllipsize(TextUtils.TruncateAt.END);
+        pathRow.addView(rootPathValue, withTopMargin(dp(6)));
+        statusList.addView(pathRow);
+        panel.addView(statusList, withTopMargin(dp(18)));
 
         restartNoticeValue = bodyText();
-        restartNoticeValue.setTextColor(Color.parseColor("#FFCF7A"));
-        panel.addView(restartNoticeValue, withTopMargin(dp(12)));
+        restartNoticeValue.setTextColor(palette.dim);
+        panel.addView(restartNoticeValue, withTopMargin(dp(14)));
         return panel;
     }
 
     private View createPackPanel(boolean wide) {
         LinearLayout panel = panel();
-        panel.addView(sectionTitle("Material packs"));
 
-        ScrollView listScroll = new ScrollView(this);
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(sectionTitle(text("materialPacks")), new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+        ));
+        Button refresh = compactButton(text("refresh"), view -> refreshStatus());
+        head.addView(refresh, new LinearLayout.LayoutParams(dp(104), dp(46)));
+        panel.addView(head);
+
+        panel.addView(createSummaryChips(), withTopMargin(dp(14)));
+
+        ScrollView listScroll = new LockingScrollView(this);
+        listScroll.setFillViewport(false);
         listScroll.setVerticalScrollBarEnabled(true);
         listScroll.setScrollbarFadingEnabled(false);
-        listScroll.setFillViewport(false);
-        packList = new LinearLayout(this);
-        packList.setOrientation(LinearLayout.VERTICAL);
-        listScroll.addView(packList, new ScrollView.LayoutParams(
+        listScroll.setNestedScrollingEnabled(false);
+        packListScrollView = listScroll;
+        LinearLayout listContent = vertical();
+        listScroll.addView(listContent, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT
         ));
 
+        listContent.addView(sectionLabel(text("enabledPacks")));
+        enabledPackList = vertical();
+        listContent.addView(enabledPackList, withTopMargin(dp(8)));
+        listContent.addView(sectionLabel(text("disabledPacks")), withTopMargin(dp(14)));
+        disabledPackList = vertical();
+        listContent.addView(disabledPackList, withTopMargin(dp(8)));
+
         LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                wide ? 0 : dp(220),
-                wide ? 1f : 0f
+                wide ? dp(340) : dp(330)
         );
-        listParams.topMargin = dp(10);
+        listParams.topMargin = dp(16);
         panel.addView(listScroll, listParams);
-
-        packSummaryValue = bodyText();
-        panel.addView(label("Status"), withTopMargin(dp(12)));
-        panel.addView(packSummaryValue, withTopMargin(dp(4)));
         return panel;
+    }
+
+    private View createSummaryChips() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        enabledLayersValue = addSummaryChip(row, text("layers"));
+        importedPacksValue = addSummaryChip(row, text("packs"));
+        topLayerValue = addSummaryChip(row, text("top"));
+        return row;
+    }
+
+    private TextView addSummaryChip(LinearLayout row, String labelText) {
+        LinearLayout chip = vertical();
+        chip.setPadding(dp(12), dp(9), dp(12), dp(9));
+        chip.setBackground(rounded(palette.surface, palette.outlineVariant, dp(16)));
+
+        TextView label = new TextView(this);
+        label.setText(labelText);
+        label.setTextColor(palette.muted);
+        label.setTextSize(12);
+        chip.addView(label);
+
+        TextView value = new TextView(this);
+        value.setTextColor(palette.text);
+        value.setTypeface(Typeface.DEFAULT_BOLD);
+        value.setTextSize(16);
+        value.setSingleLine(true);
+        value.setEllipsize(TextUtils.TruncateAt.END);
+        chip.addView(value, withTopMargin(dp(2)));
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        if (row.getChildCount() > 0) {
+            params.leftMargin = dp(8);
+        }
+        row.addView(chip, params);
+        return value;
     }
 
     private View createActionPanel(boolean wide) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
 
-        Button refresh = createActionButton("Refresh", view -> refreshStatus());
-        Button importZip = createActionButton("Import ZIP", view -> openImportPicker());
-        Button copy = createActionButton("Copy diagnostics", this::copyDiagnostics);
-        openTargetButton = createActionButton("Open Arcaea", view -> openTargetApp(null));
+        Button refresh = createActionButton(text("refresh"), view -> refreshStatus());
+        Button importZip = createActionButton(text("importZip"), view -> openImportPicker());
+        Button copy = createActionButton(text("copyDiagnostics"), this::copyDiagnostics);
+        openTargetButton = createActionButton(text("openArcaea"), view -> openTargetApp(null));
 
         if (wide) {
             panel.addView(refresh, weightedButton());
@@ -260,102 +380,223 @@ public final class MainActivity extends Activity {
         return panel;
     }
 
-    private LinearLayout panel() {
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(16), dp(18), dp(16));
-        panel.setBackground(rounded(Color.parseColor("#151B24"), Color.parseColor("#273242"), dp(8)));
-        return panel;
-    }
-
     private View createPackRow(PackCatalog.Entry entry, int activeIndex, int activeCount) {
-        boolean checked = activeIndex >= 0;
+        boolean active = activeIndex >= 0;
         LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(dp(10), dp(8), dp(10), dp(8));
-        row.setBackground(rounded(Color.parseColor("#121923"), Color.parseColor("#243344"), dp(7)));
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setMinimumHeight(dp(96));
+        row.setBackground(rounded(
+                active ? palette.activeContainer : palette.surface,
+                active ? palette.primary : palette.outlineVariant,
+                dp(18)
+        ));
 
-        CheckBox checkBox = new CheckBox(this);
-        checkBox.setText(entry.name + "\n" + entry.description);
-        checkBox.setTextColor(checked ? Color.parseColor("#F4F7FB") : Color.parseColor("#C8D4DF"));
-        checkBox.setTextSize(13);
-        checkBox.setLineSpacing(dp(2), 1f);
-        checkBox.setChecked(checked);
-        checkBox.setEnabled(checked || entry.available || ArcDarkConstants.TEST_PACK_ID.equals(entry.id));
-        checkBox.setOnCheckedChangeListener((button, enabled) -> onPackEnabledChanged(entry.id, enabled));
-        row.addView(checkBox);
+        row.addView(createCoverSlot(entry, active), new LinearLayout.LayoutParams(dp(64), dp(64)));
 
-        if (checked) {
-            LinearLayout controls = new LinearLayout(this);
-            controls.setOrientation(LinearLayout.HORIZONTAL);
-            controls.setGravity(Gravity.END);
+        LinearLayout textBox = vertical();
+        textBox.setPadding(dp(12), 0, dp(10), 0);
+        TextView name = new TextView(this);
+        name.setText(entry.name);
+        name.setTextColor(palette.text);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setTextSize(18);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        textBox.addView(name);
 
-            Button up = smallButton("Up", view -> movePack(entry.id, -1));
+        TextView meta = bodyText();
+        meta.setText(formatPackMeta(entry));
+        meta.setMaxLines(2);
+        meta.setEllipsize(TextUtils.TruncateAt.END);
+        textBox.addView(meta, withTopMargin(dp(3)));
+        row.addView(textBox, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (active) {
+            Button up = compactButton("↑", view -> movePack(entry.id, -1));
+            up.setContentDescription(text("up"));
             up.setEnabled(activeIndex > 0);
             up.setAlpha(activeIndex > 0 ? 1f : 0.45f);
-            Button down = smallButton("Down", view -> movePack(entry.id, 1));
-            down.setEnabled(activeIndex < activeCount - 1);
-            down.setAlpha(activeIndex < activeCount - 1 ? 1f : 0.45f);
-            controls.addView(up, smallButtonParams());
-            LinearLayout.LayoutParams downParams = smallButtonParams();
-            downParams.leftMargin = dp(8);
-            controls.addView(down, downParams);
-            row.addView(controls, withTopMargin(dp(6)));
+            Button disable = compactButton("×", view -> onPackEnabledChanged(entry.id, false));
+            disable.setContentDescription(text("disablePack"));
+            row.addView(up, new LinearLayout.LayoutParams(dp(58), dp(48)));
+            LinearLayout.LayoutParams disableParams = new LinearLayout.LayoutParams(dp(58), dp(48));
+            disableParams.leftMargin = dp(8);
+            row.addView(disable, disableParams);
+        } else {
+            Button enable = compactButton(text("enable"), view -> onPackEnabledChanged(entry.id, true));
+            boolean canEnable = entry.available || ArcDarkConstants.TEST_PACK_ID.equals(entry.id);
+            enable.setEnabled(canEnable);
+            enable.setAlpha(canEnable ? 1f : 0.5f);
+            row.addView(enable, new LinearLayout.LayoutParams(dp(84), dp(48)));
         }
 
         return row;
+    }
+
+    private View createCoverSlot(PackCatalog.Entry entry, boolean active) {
+        FrameLayout slot = new FrameLayout(this);
+        slot.setBackground(rounded(palette.surfaceContainerHigh, palette.outlineVariant, dp(16)));
+
+        ImageView cover = createCoverView(entry.coverFile);
+        if (cover != null) {
+            slot.addView(cover, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+        } else {
+            TextView fallback = new TextView(this);
+            fallback.setText("IMG");
+            fallback.setGravity(Gravity.CENTER);
+            fallback.setTextColor(palette.dim);
+            fallback.setTextSize(11);
+            fallback.setTypeface(Typeface.DEFAULT_BOLD);
+            slot.addView(fallback, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+        }
+
+        if (active) {
+            TextView badge = new TextView(this);
+            badge.setText("✓");
+            badge.setGravity(Gravity.CENTER);
+            badge.setTextColor(palette.onPrimary);
+            badge.setTextSize(15);
+            badge.setTypeface(Typeface.DEFAULT_BOLD);
+            badge.setBackground(rounded(palette.primary, palette.primary, dp(9)));
+            FrameLayout.LayoutParams badgeParams = new FrameLayout.LayoutParams(dp(28), dp(28), Gravity.BOTTOM | Gravity.RIGHT);
+            slot.addView(badge, badgeParams);
+        }
+        return slot;
+    }
+
+    private ImageView createCoverView(File coverFile) {
+        if (coverFile == null || !coverFile.isFile()) {
+            return null;
+        }
+
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(coverFile.getAbsolutePath(), bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null;
+        }
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = calculateInSampleSize(bounds, dp(72), dp(72));
+        Bitmap bitmap = BitmapFactory.decodeFile(coverFile.getAbsolutePath(), options);
+        if (bitmap == null) {
+            return null;
+        }
+
+        ImageView image = new ImageView(this);
+        image.setImageBitmap(bitmap);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setBackground(rounded(palette.surfaceContainerHigh, palette.outlineVariant, dp(16)));
+        return image;
+    }
+
+    private int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
+        int inSampleSize = 1;
+        int height = options.outHeight;
+        int width = options.outWidth;
+        while ((height / inSampleSize) > reqHeight * 2 || (width / inSampleSize) > reqWidth * 2) {
+            inSampleSize *= 2;
+        }
+        return inSampleSize;
+    }
+
+    private String formatPackMeta(PackCatalog.Entry entry) {
+        List<String> parts = new ArrayList<>();
+        if (hasText(entry.version)) {
+            parts.add("v" + entry.version.trim());
+        }
+        if (hasText(entry.author)) {
+            parts.add(entry.author.trim());
+        }
+        if (hasText(entry.description)) {
+            parts.add(entry.description.trim());
+        }
+        if (parts.isEmpty()) {
+            return entry.builtIn ? text("builtInPack") : entry.id;
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) {
+                builder.append(" · ");
+            }
+            builder.append(parts.get(i));
+        }
+        return builder.toString();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && value.trim().length() > 0;
     }
 
     private TextView addStatusRow(LinearLayout panel, String labelText) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(18), dp(14), dp(18), dp(14));
 
         TextView label = label(labelText);
-        row.addView(label, new LinearLayout.LayoutParams(dp(110), LinearLayout.LayoutParams.WRAP_CONTENT));
+        row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView value = valueText();
         row.addView(value, new LinearLayout.LayoutParams(
-                0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
+                LinearLayout.LayoutParams.WRAP_CONTENT
         ));
 
-        panel.addView(row, withTopMargin(dp(10)));
+        panel.addView(row);
         return value;
     }
 
     private TextView sectionTitle(String text) {
         TextView title = new TextView(this);
         title.setText(text);
-        title.setTextColor(Color.parseColor("#66E2D5"));
+        title.setTextColor(palette.primary);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextSize(14);
+        title.setTextSize(28);
         return title;
+    }
+
+    private TextView sectionLabel(String text) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextColor(palette.dim);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setTextSize(12);
+        return label;
     }
 
     private TextView label(String text) {
         TextView label = new TextView(this);
         label.setText(text);
-        label.setTextColor(Color.parseColor("#91A0AE"));
-        label.setTextSize(13);
+        label.setTextColor(palette.muted);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setTextSize(16);
         return label;
     }
 
     private TextView valueText() {
         TextView value = new TextView(this);
-        value.setTextColor(Color.parseColor("#F4F7FB"));
+        value.setTextColor(palette.text);
         value.setTypeface(Typeface.DEFAULT_BOLD);
-        value.setTextSize(14);
+        value.setTextSize(16);
         value.setGravity(Gravity.END);
-        value.setLineSpacing(dp(2), 1f);
+        value.setSingleLine(true);
+        value.setEllipsize(TextUtils.TruncateAt.END);
         return value;
     }
 
     private TextView bodyText() {
         TextView text = new TextView(this);
-        text.setTextColor(Color.parseColor("#C8D4DF"));
-        text.setTextSize(13);
+        text.setTextColor(palette.muted);
+        text.setTextSize(14);
         text.setLineSpacing(dp(2), 1f);
         return text;
     }
@@ -364,72 +605,167 @@ public final class MainActivity extends Activity {
         Button button = new Button(this);
         button.setAllCaps(false);
         button.setText(text);
-        button.setTextSize(14);
-        button.setTextColor(Color.parseColor("#F4F7FB"));
+        button.setTextSize(15);
+        button.setTextColor(palette.text);
         button.setGravity(Gravity.CENTER);
-        button.setMinHeight(dp(46));
+        button.setMinHeight(dp(56));
         button.setPadding(dp(12), 0, dp(12), 0);
-        button.setBackground(rounded(Color.parseColor("#1D2A38"), Color.parseColor("#344658"), dp(7)));
+        button.setBackground(rounded(palette.secondaryContainer, palette.outlineVariant, dp(18)));
         button.setOnClickListener(listener);
         return button;
     }
 
-    private Button smallButton(String text, View.OnClickListener listener) {
-        Button button = createActionButton(text, listener);
-        button.setTextSize(12);
-        button.setMinHeight(dp(34));
-        button.setPadding(dp(10), 0, dp(10), 0);
+    private Button compactButton(String text, View.OnClickListener listener) {
+        Button button = new Button(this);
+        button.setAllCaps(false);
+        button.setText(text);
+        button.setTextSize(13);
+        button.setTextColor(palette.text);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(8), 0, dp(8), 0);
+        button.setMinHeight(0);
+        button.setMinWidth(0);
+        button.setBackground(rounded(palette.surfaceContainerHigh, palette.outlineVariant, dp(14)));
+        button.setOnClickListener(listener);
         return button;
     }
 
+    private View createControlGroup(String label, View control) {
+        LinearLayout group = vertical();
+        TextView labelView = new TextView(this);
+        labelView.setText(label);
+        labelView.setTextColor(palette.dim);
+        labelView.setTypeface(Typeface.DEFAULT_BOLD);
+        labelView.setTextSize(12);
+        group.addView(labelView);
+        group.addView(control, withTopMargin(dp(6)));
+        return group;
+    }
+
+    private View createSegmentedControl(Button left, Button right) {
+        LinearLayout control = new LinearLayout(this);
+        control.setOrientation(LinearLayout.HORIZONTAL);
+        control.setPadding(dp(4), dp(4), dp(4), dp(4));
+        control.setBackground(rounded(palette.surfaceContainer, palette.outlineVariant, dp(24)));
+        control.addView(left, new LinearLayout.LayoutParams(dp(92), dp(42)));
+        control.addView(right, new LinearLayout.LayoutParams(dp(92), dp(42)));
+        return control;
+    }
+
+    private Button createSegmentButton(String text, boolean active, View.OnClickListener listener) {
+        Button button = new Button(this);
+        button.setAllCaps(false);
+        button.setText(text);
+        button.setTextSize(14);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextColor(active ? palette.onPrimaryContainer : palette.muted);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(0, 0, 0, 0);
+        button.setMinHeight(0);
+        button.setMinWidth(0);
+        button.setBackground(rounded(active ? palette.primaryContainer : Color.TRANSPARENT, Color.TRANSPARENT, dp(20)));
+        button.setOnClickListener(listener);
+        return button;
+    }
+
+    private LinearLayout panel() {
+        LinearLayout panel = vertical();
+        panel.setPadding(dp(22), dp(22), dp(22), dp(22));
+        panel.setBackground(rounded(palette.surfaceContainerLow, palette.outlineVariant, dp(26)));
+        return panel;
+    }
+
+    private LinearLayout vertical() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        return layout;
+    }
+
     private void refreshStatus() {
-        snapshot = StatusSnapshot.capture(this);
+        if (injectionSwitch == null) {
+            return;
+        }
+        snapshot = UiStatusSnapshot.capture(this);
         binding = true;
         injectionSwitch.setChecked(snapshot.control.injectionEnabled);
         binding = false;
 
-        injectionStatusValue.setText(snapshot.control.injectionEnabled ? "Enabled" : "Disabled");
-        injectionStatusValue.setTextColor(snapshot.control.injectionEnabled
-                ? Color.parseColor("#80E6A2")
-                : Color.parseColor("#FFB87A"));
-        currentPackValue.setText(formatPackOrder(snapshot.control.activePackOrder));
-        targetStatusValue.setText(snapshot.targetInstalled ? "Installed" : "Not installed");
-        targetStatusValue.setTextColor(snapshot.targetInstalled
-                ? Color.parseColor("#80E6A2")
-                : Color.parseColor("#FFB87A"));
+        injectionStatusValue.setText(snapshot.control.injectionEnabled ? text("enabled") : text("disabled"));
+        injectionStatusValue.setTextColor(snapshot.control.injectionEnabled ? palette.success : palette.warning);
+        targetStatusValue.setText(snapshot.targetInstalled ? text("installed") : text("notInstalled"));
+        targetStatusValue.setTextColor(snapshot.targetInstalled ? palette.success : palette.warning);
         assetCountValue.setText(snapshot.overrideCount);
         rootPathValue.setText(snapshot.targetRootPath);
-        packSummaryValue.setText(snapshot.packSummary);
-        restartNoticeValue.setText(APPLY_NOTICE);
+        restartNoticeValue.setText(text("applyNotice"));
+        enabledLayersValue.setText(String.valueOf(snapshot.control.activePackOrder.size()));
+        importedPacksValue.setText(String.valueOf(importedPackCount()));
+        topLayerValue.setText(topLayerText());
         openTargetButton.setEnabled(snapshot.targetInstalled);
         openTargetButton.setAlpha(snapshot.targetInstalled ? 1f : 0.55f);
         rebuildPackList();
     }
 
-    private void rebuildPackList() {
-        packList.removeAllViews();
-        int activeCount = snapshot.control.activePackOrder.size();
-        for (PackCatalog.Entry entry : displayPacksInOrder()) {
-            int activeIndex = snapshot.control.activePackOrder.indexOf(entry.id);
-            LinearLayout.LayoutParams params = withTopMargin(packList.getChildCount() == 0 ? 0 : dp(8));
-            packList.addView(createPackRow(entry, activeIndex, activeCount), params);
+    private int importedPackCount() {
+        int imported = 0;
+        for (PackCatalog.Entry entry : snapshot.packs) {
+            if (!entry.builtIn) {
+                imported++;
+            }
         }
+        return imported;
     }
 
-    private List<PackCatalog.Entry> displayPacksInOrder() {
-        List<PackCatalog.Entry> ordered = new ArrayList<>();
+    private String topLayerText() {
+        if (snapshot.control.activePackOrder.isEmpty()) {
+            return text("original");
+        }
+        return snapshot.control.activePackOrder.get(0);
+    }
+
+    private void rebuildPackList() {
+        enabledPackList.removeAllViews();
+        disabledPackList.removeAllViews();
+        int activeCount = snapshot.control.activePackOrder.size();
+
         for (String packId : snapshot.control.activePackOrder) {
             PackCatalog.Entry entry = findPackEntry(packId);
             if (entry != null) {
-                ordered.add(entry);
+                addPackRow(enabledPackList, createPackRow(entry, snapshot.control.activePackOrder.indexOf(entry.id), activeCount));
             }
         }
+
         for (PackCatalog.Entry entry : snapshot.packs) {
             if (snapshot.control.activePackOrder.indexOf(entry.id) < 0) {
-                ordered.add(entry);
+                addPackRow(disabledPackList, createPackRow(entry, -1, activeCount));
             }
         }
-        return ordered;
+
+        if (enabledPackList.getChildCount() == 0) {
+            enabledPackList.addView(emptyText(text("noEnabledPacks")));
+        }
+        if (disabledPackList.getChildCount() == 0) {
+            disabledPackList.addView(emptyText(text("noDisabledPacks")));
+        }
+    }
+
+    private void addPackRow(LinearLayout list, View row) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(96)
+        );
+        if (list.getChildCount() > 0) {
+            params.topMargin = dp(10);
+        }
+        list.addView(row, params);
+    }
+
+    private TextView emptyText(String value) {
+        TextView text = bodyText();
+        text.setText(value);
+        text.setGravity(Gravity.CENTER);
+        text.setPadding(dp(12), dp(18), dp(12), dp(18));
+        text.setBackground(rounded(palette.surface, palette.outlineVariant, dp(18)));
+        return text;
     }
 
     private PackCatalog.Entry findPackEntry(String packId) {
@@ -452,38 +788,26 @@ public final class MainActivity extends Activity {
         if (binding || snapshot == null) {
             return;
         }
-        List<String> order = new ArrayList<>(snapshot.control.activePackOrder);
-        if (enabled) {
-            if (!order.contains(packId)) {
-                order.add(packId);
-            }
-        } else {
-            order.remove(packId);
-        }
-        saveControl(snapshot.control.withActivePackOrder(order));
+        saveControl(PackOrderController.setPackEnabled(snapshot.control, packId, enabled));
     }
 
     private void movePack(String packId, int direction) {
         if (snapshot == null) {
             return;
         }
-        List<String> order = new ArrayList<>(snapshot.control.activePackOrder);
-        int index = order.indexOf(packId);
-        int nextIndex = index + direction;
-        if (index < 0 || nextIndex < 0 || nextIndex >= order.size()) {
+        ArcDarkControl.Control next = PackOrderController.movePack(snapshot.control, packId, direction);
+        if (next.activePackOrder.equals(snapshot.control.activePackOrder)) {
             return;
         }
-        String moving = order.remove(index);
-        order.add(nextIndex, moving);
-        saveControl(snapshot.control.withActivePackOrder(order));
+        saveControl(next);
     }
 
     private void saveControl(ArcDarkControl.Control control) {
         try {
             ArcDarkControl.writeLocal(this, control);
-            Toast.makeText(this, "Saved. Fully close Arcaea, then use Open Arcaea here.", Toast.LENGTH_SHORT).show();
+            toast(text("saved"));
         } catch (Exception exception) {
-            Toast.makeText(this, "Unable to save control state", Toast.LENGTH_SHORT).show();
+            toast(text("unableSave"));
         }
         refreshStatus();
     }
@@ -515,58 +839,137 @@ public final class MainActivity extends Activity {
     private void copyDiagnostics(View ignored) {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard == null || snapshot == null) {
-            Toast.makeText(this, "Diagnostics unavailable", Toast.LENGTH_SHORT).show();
+            toast(text("diagnosticsUnavailable"));
             return;
         }
         clipboard.setPrimaryClip(ClipData.newPlainText("Arc Dark diagnostics", snapshot.diagnostics));
-        Toast.makeText(this, "Diagnostics copied", Toast.LENGTH_SHORT).show();
+        toast(text("diagnosticsCopied"));
     }
 
     private void openTargetApp(Uri importUri) {
-        Intent launchIntent = getPackageManager().getLaunchIntentForPackage(ArcDarkConstants.TARGET_PACKAGE);
-        if (launchIntent == null) {
-            Toast.makeText(this, "Arcaea is not installed", Toast.LENGTH_SHORT).show();
-            return;
+        if (!ArcDarkLauncher.openTargetApp(this, importUri)) {
+            toast(text("targetMissing"));
         }
-        ArcDarkControl.Control control = ArcDarkControl.readLocal(this);
-        launchIntent.putExtra(ArcDarkRuntimeControl.EXTRA_INJECTION_ENABLED, control.injectionEnabled);
-        launchIntent.putExtra(ArcDarkRuntimeControl.EXTRA_ACTIVE_PACK_ID, control.primaryPackId());
-        launchIntent.putExtra(
-                ArcDarkRuntimeControl.EXTRA_ACTIVE_PACK_ORDER,
-                control.activePackOrder.toArray(new String[0])
-        );
-        if (importUri != null) {
-            launchIntent.putExtra(ArcDarkRuntimeControl.EXTRA_IMPORT_PACK_URI, importUri);
-            launchIntent.setClipData(ClipData.newUri(getContentResolver(), "Arc Dark ZIP pack", importUri));
-            launchIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        }
-        startActivity(launchIntent);
+    }
+
+    private boolean isWideLayout() {
+        Configuration configuration = getResources().getConfiguration();
+        return configuration.screenWidthDp >= WIDE_BREAKPOINT_DP;
     }
 
     private void alignPanelHeights(View left, View right) {
-        int height = left.getHeight();
-        if (height <= 0) {
+        int targetHeight = Math.max(left.getHeight(), right.getHeight());
+        if (targetHeight <= 0) {
             return;
         }
-        android.view.ViewGroup.LayoutParams params = right.getLayoutParams();
+        setViewHeight(left, targetHeight);
+        setViewHeight(right, targetHeight);
+    }
+
+    private void setViewHeight(View view, int height) {
+        android.view.ViewGroup.LayoutParams params = view.getLayoutParams();
         if (params != null && params.height != height) {
             params.height = height;
-            right.setLayoutParams(params);
+            view.setLayoutParams(params);
         }
     }
 
-    private String formatPackOrder(List<String> packOrder) {
-        if (packOrder.isEmpty()) {
-            return "Original";
-        }
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < packOrder.size(); i++) {
-            if (i > 0) {
-                builder.append(" > ");
+    private String text(String key) {
+        if (chinese) {
+            switch (key) {
+                case "subtitle": return "Arcaea 材质修改";
+                case "languageLabel": return "语言";
+                case "themeLabel": return "主题";
+                case "dark": return "深色";
+                case "light": return "浅色";
+                case "injection": return "注入";
+                case "enableInjection": return "启用注入";
+                case "enableHint": return "打开 Arcaea 时应用当前材质包。";
+                case "state": return "状态";
+                case "enabled": return "已启用";
+                case "disabled": return "已关闭";
+                case "targetApp": return "目标应用";
+                case "installed": return "已安装";
+                case "notInstalled": return "未安装";
+                case "difference": return "当前修改素材";
+                case "runtimePath": return "运行路径";
+                case "materialPacks": return "材质包";
+                case "layers": return "启用";
+                case "packs": return "导入";
+                case "top": return "顶层";
+                case "original": return "原始资源";
+                case "enabledPacks": return "已启用";
+                case "disabledPacks": return "未启用";
+                case "enable": return "启用";
+                case "up": return "上移";
+                case "disablePack": return "禁用";
+                case "refresh": return "刷新";
+                case "importZip": return "导入 ZIP";
+                case "copyDiagnostics": return "复制诊断";
+                case "openArcaea": return "打开 Arcaea";
+                case "applyNotice": return "使用打开 Arcaea 来应用修改；后续重启会复用已应用状态。";
+                case "saved": return "已保存。请完全关闭 Arcaea，再从这里打开。";
+                case "unableSave": return "无法保存控制状态";
+                case "targetMissing": return "未安装 Arcaea";
+                case "invalidZip": return "无效的 Arc Dark ZIP 包";
+                case "selectedUnavailable": return "所选文件不可用";
+                case "diagnosticsUnavailable": return "诊断不可用";
+                case "diagnosticsCopied": return "诊断已复制";
+                case "builtInPack": return "当前修改素材";
+                case "noEnabledPacks": return "暂无已启用材质包";
+                case "noDisabledPacks": return "暂无未启用材质包";
+                default: return key;
             }
-            builder.append(packOrder.get(i));
         }
-        return builder.toString();
+
+        switch (key) {
+            case "subtitle": return "Arcaea material customization";
+            case "languageLabel": return "Language";
+            case "themeLabel": return "Theme";
+            case "dark": return "Dark";
+            case "light": return "Light";
+            case "injection": return "Injection";
+            case "enableInjection": return "Enable injection";
+            case "enableHint": return "Applies active material packs when Arcaea opens.";
+            case "state": return "State";
+            case "enabled": return "Enabled";
+            case "disabled": return "Disabled";
+            case "targetApp": return "Target app";
+            case "installed": return "Installed";
+            case "notInstalled": return "Not installed";
+            case "difference": return "Difference";
+            case "runtimePath": return "Runtime path";
+            case "materialPacks": return "Material packs";
+            case "layers": return "Layers";
+            case "packs": return "Packs";
+            case "top": return "Top";
+            case "original": return "Original";
+            case "enabledPacks": return "Enabled";
+            case "disabledPacks": return "Disabled";
+            case "enable": return "Enable";
+            case "up": return "Up";
+            case "disablePack": return "Disable";
+            case "refresh": return "Refresh";
+            case "importZip": return "Import ZIP";
+            case "copyDiagnostics": return "Copy diagnostics";
+            case "openArcaea": return "Open Arcaea";
+            case "applyNotice": return "Use Open Arcaea to apply changes. Later restarts reuse the applied state.";
+            case "saved": return "Saved. Fully close Arcaea, then use Open Arcaea here.";
+            case "unableSave": return "Unable to save control state";
+            case "targetMissing": return "Arcaea is not installed";
+            case "invalidZip": return "Invalid Arc Dark ZIP pack";
+            case "selectedUnavailable": return "Selected file is unavailable";
+            case "diagnosticsUnavailable": return "Diagnostics unavailable";
+            case "diagnosticsCopied": return "Diagnostics copied";
+            case "builtInPack": return "Difference";
+            case "noEnabledPacks": return "No enabled packs";
+            case "noDisabledPacks": return "No disabled packs";
+            default: return key;
+        }
+    }
+
+    private void toast(String text) {
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
     }
 
     private GradientDrawable rounded(int fillColor, int strokeColor, int radius) {
@@ -596,160 +999,187 @@ public final class MainActivity extends Activity {
         return params;
     }
 
-    private LinearLayout.LayoutParams smallButtonParams() {
-        return new LinearLayout.LayoutParams(dp(82), LinearLayout.LayoutParams.WRAP_CONTENT);
-    }
-
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private static final class StatusSnapshot {
-        final ArcDarkControl.Control control;
-        final String overrideCount;
-        final boolean targetInstalled;
-        final String targetRootPath;
-        final List<PackCatalog.Entry> packs;
-        final String packSummary;
-        final String diagnostics;
+    private static int color(String value) {
+        return Color.parseColor(value);
+    }
 
-        private StatusSnapshot(
-                ArcDarkControl.Control control,
-                String overrideCount,
-                boolean targetInstalled,
-                String targetRootPath,
-                List<PackCatalog.Entry> packs,
-                String packSummary,
-                String diagnostics
-        ) {
-            this.control = control;
-            this.overrideCount = overrideCount;
-            this.targetInstalled = targetInstalled;
-            this.targetRootPath = targetRootPath;
-            this.packs = packs;
-            this.packSummary = packSummary;
-            this.diagnostics = diagnostics;
+    private final class RootScrollView extends ScrollView {
+        private View lockedChild;
+        private boolean lockedGesture;
+        private final int[] selfLocation = new int[2];
+        private final int[] childLocation = new int[2];
+
+        RootScrollView(Context context) {
+            super(context);
         }
 
-        static StatusSnapshot capture(MainActivity activity) {
-            ArcDarkControl.Control control = ArcDarkControl.readLocal(activity);
-            String moduleVersion = readModuleVersion(activity);
-            String overrideCount = readOverrideCount(activity);
-            boolean targetInstalled = isPackageInstalled(activity, ArcDarkConstants.TARGET_PACKAGE);
-            File targetRoot = ArcDarkPaths.estimatedTargetRoot();
-            List<PackCatalog.Entry> packs = PackCatalog.list(targetRoot);
-            appendMissingActivePacks(packs, control.activePackOrder);
-            String checkedAt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
-            String activeOrder = control.activePackOrder.isEmpty()
-                    ? "Original"
-                    : control.activePackOrder.toString();
-            int importedCount = 0;
-            for (PackCatalog.Entry entry : packs) {
-                if (!entry.builtIn) {
-                    importedCount++;
+        void setLockedChild(View child) {
+            lockedChild = child;
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent event) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                lockedGesture = isInsideLockedChild(event);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                lockedGesture = false;
+            }
+            return !lockedGesture && super.onInterceptTouchEvent(event);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            if (lockedGesture) {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    lockedGesture = false;
                 }
-            }
-            String packSummary = "Enabled layers: " + control.activePackOrder.size()
-                    + "\nImported packs: " + importedCount
-                    + "\nTop layer: " + (control.activePackOrder.isEmpty()
-                    ? "Original game assets"
-                    : control.activePackOrder.get(0));
-            String diagnostics = "Arc Dark diagnostics"
-                    + "\nChecked: " + checkedAt
-                    + "\nModule package: " + activity.getPackageName()
-                    + "\nModule version: " + moduleVersion
-                    + "\nTarget package: " + ArcDarkConstants.TARGET_PACKAGE
-                    + "\nTarget installed: " + targetInstalled
-                    + "\nInjection enabled: " + control.injectionEnabled
-                    + "\nActive pack order: " + activeOrder
-                    + "\nBundled overrides: " + overrideCount
-                    + "\nKnown packs: " + packs.size()
-                    + "\nControl file: " + ArcDarkControl.controlFile(activity).getAbsolutePath()
-                    + "\nTarget control: " + new File(targetRoot, ArcDarkConstants.CONTROL_FILE_NAME).getAbsolutePath()
-                    + "\nTarget root: " + targetRoot.getAbsolutePath();
-            return new StatusSnapshot(
-                    control,
-                    overrideCount,
-                    targetInstalled,
-                    targetRoot.getAbsolutePath(),
-                    packs,
-                    packSummary,
-                    diagnostics
-            );
-        }
-
-        private static void appendMissingActivePacks(List<PackCatalog.Entry> packs, List<String> activeOrder) {
-            for (String packId : activeOrder) {
-                boolean found = false;
-                for (PackCatalog.Entry entry : packs) {
-                    if (entry.id.equals(packId)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found && ArcDarkControl.isAllowedPackId(packId)) {
-                    packs.add(new PackCatalog.Entry(
-                            packId,
-                            packId,
-                            "Not detected at the estimated runtime path",
-                            false,
-                            false
-                    ));
-                }
-            }
-        }
-
-        @SuppressWarnings("deprecation")
-        private static String readModuleVersion(MainActivity activity) {
-            try {
-                PackageInfo info = getPackageInfo(activity, activity.getPackageName());
-                long code = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
-                        ? info.getLongVersionCode()
-                        : info.versionCode;
-                return info.versionName + " (" + code + ")";
-            } catch (PackageManager.NameNotFoundException exception) {
-                return "Unavailable";
-            }
-        }
-
-        private static String readOverrideCount(MainActivity activity) {
-            try {
-                JSONObject root = new JSONObject(readUtf8(activity.getAssets().open(INDEX_ASSET)));
-                JSONArray entries = root.getJSONArray("entries");
-                return String.valueOf(entries.length());
-            } catch (Exception exception) {
-                return "Unavailable";
-            }
-        }
-
-        private static boolean isPackageInstalled(MainActivity activity, String packageName) {
-            try {
-                getPackageInfo(activity, packageName);
-                return true;
-            } catch (PackageManager.NameNotFoundException exception) {
                 return false;
             }
+            return super.onTouchEvent(event);
         }
 
-        @SuppressWarnings("deprecation")
-        private static PackageInfo getPackageInfo(MainActivity activity, String packageName)
-                throws PackageManager.NameNotFoundException {
-            PackageManager manager = activity.getPackageManager();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                return manager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0));
+        private boolean isInsideLockedChild(MotionEvent event) {
+            if (lockedChild == null || !lockedChild.isShown()) {
+                return false;
             }
-            return manager.getPackageInfo(packageName, 0);
+            getLocationOnScreen(selfLocation);
+            lockedChild.getLocationOnScreen(childLocation);
+            float rawX = selfLocation[0] + event.getX();
+            float rawY = selfLocation[1] + event.getY();
+            return rawX >= childLocation[0]
+                    && rawX <= childLocation[0] + lockedChild.getWidth()
+                    && rawY >= childLocation[1]
+                    && rawY <= childLocation[1] + lockedChild.getHeight();
+        }
+    }
+
+    private final class LockingScrollView extends ScrollView {
+        private boolean lockParentScroll;
+
+        LockingScrollView(Context context) {
+            super(context);
         }
 
-        private static String readUtf8(InputStream input) throws Exception {
-            try (InputStream in = input; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[8192];
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, read);
-                }
-                return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent event) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                lockParentScroll = canScrollVertically(-1) || canScrollVertically(1);
+                getParent().requestDisallowInterceptTouchEvent(lockParentScroll);
+            } else if (action == MotionEvent.ACTION_MOVE) {
+                getParent().requestDisallowInterceptTouchEvent(lockParentScroll);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                lockParentScroll = false;
+                getParent().requestDisallowInterceptTouchEvent(false);
             }
+            return super.dispatchTouchEvent(event);
+        }
+    }
+
+    private static final class Palette {
+        final int background;
+        final int surface;
+        final int surfaceContainerLow;
+        final int surfaceContainer;
+        final int surfaceContainerHigh;
+        final int secondaryContainer;
+        final int activeContainer;
+        final int primary;
+        final int onPrimary;
+        final int primaryContainer;
+        final int onPrimaryContainer;
+        final int outlineVariant;
+        final int text;
+        final int muted;
+        final int dim;
+        final int success;
+        final int warning;
+
+        private Palette(
+                int background,
+                int surface,
+                int surfaceContainerLow,
+                int surfaceContainer,
+                int surfaceContainerHigh,
+                int secondaryContainer,
+                int activeContainer,
+                int primary,
+                int onPrimary,
+                int primaryContainer,
+                int onPrimaryContainer,
+                int outlineVariant,
+                int text,
+                int muted,
+                int dim,
+                int success,
+                int warning
+        ) {
+            this.background = background;
+            this.surface = surface;
+            this.surfaceContainerLow = surfaceContainerLow;
+            this.surfaceContainer = surfaceContainer;
+            this.surfaceContainerHigh = surfaceContainerHigh;
+            this.secondaryContainer = secondaryContainer;
+            this.activeContainer = activeContainer;
+            this.primary = primary;
+            this.onPrimary = onPrimary;
+            this.primaryContainer = primaryContainer;
+            this.onPrimaryContainer = onPrimaryContainer;
+            this.outlineVariant = outlineVariant;
+            this.text = text;
+            this.muted = muted;
+            this.dim = dim;
+            this.success = success;
+            this.warning = warning;
+        }
+
+        static Palette forMode(boolean light) {
+            if (light) {
+                return new Palette(
+                        color("#F7FAFD"),
+                        color("#FFFFFF"),
+                        color("#F1F5F8"),
+                        color("#E8EEF3"),
+                        color("#DFE7ED"),
+                        color("#D5E4EF"),
+                        color("#D9F4F6"),
+                        color("#006A70"),
+                        color("#FFFFFF"),
+                        color("#8FF3FB"),
+                        color("#002F34"),
+                        color("#C1C7D0"),
+                        color("#171C22"),
+                        color("#42515D"),
+                        color("#61717F"),
+                        color("#006C5B"),
+                        color("#9A4B00")
+                );
+            }
+            return new Palette(
+                    color("#0D1118"),
+                    color("#111820"),
+                    color("#18212C"),
+                    color("#1D2734"),
+                    color("#26313F"),
+                    color("#344450"),
+                    color("#0C3440"),
+                    color("#7DE8EF"),
+                    color("#00363B"),
+                    color("#0F4B52"),
+                    color("#B7FAFF"),
+                    color("#414C58"),
+                    color("#EDF4FB"),
+                    color("#B7C6D4"),
+                    color("#8593A2"),
+                    color("#84F1D8"),
+                    color("#FFD58F")
+            );
         }
     }
 }

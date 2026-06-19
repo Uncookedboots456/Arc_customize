@@ -64,7 +64,8 @@ final class ArcDarkRuntimeControl {
             return null;
         }
         List<String> order = readPackOrderExtra(intent);
-        if (order == null && intent.hasExtra(EXTRA_ACTIVE_PACK_ID)) {
+        if ((order == null || ArcDarkControl.sanitizePackOrder(order).isEmpty())
+                && intent.hasExtra(EXTRA_ACTIVE_PACK_ID)) {
             order = new ArrayList<>();
             order.add(intent.getStringExtra(EXTRA_ACTIVE_PACK_ID));
         }
