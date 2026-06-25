@@ -49,7 +49,7 @@ final class UiStatusSnapshot {
         String overrideCount = readOverrideCount(context);
         boolean targetInstalled = isPackageInstalled(context, ArcDarkConstants.TARGET_PACKAGE);
         File targetRoot = ArcDarkPaths.estimatedTargetRoot();
-        List<PackCatalog.Entry> packs = PackCatalog.list(targetRoot);
+        List<PackCatalog.Entry> packs = PackCatalog.list(targetRoot, materializeBuiltInCover(context));
         appendMissingActivePacks(packs, control.activePackOrder);
         String checkedAt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
         String activeOrder = control.activePackOrder.isEmpty()
@@ -111,6 +111,22 @@ final class UiStatusSnapshot {
                         false
                 ));
             }
+        }
+    }
+
+    private static File materializeBuiltInCover(Context context) {
+        File coverFile = new File(context.getCacheDir(), ArcDarkConstants.BUILT_IN_PACK_COVER_CACHE);
+        if (coverFile.isFile() && coverFile.length() > 0) {
+            return coverFile;
+        }
+        try {
+            ArcDarkFileOps.copy(
+                    context.getAssets().open(ArcDarkConstants.BUILT_IN_PACK_COVER_ASSET),
+                    coverFile
+            );
+            return coverFile.isFile() ? coverFile : null;
+        } catch (Exception ignored) {
+            return null;
         }
     }
 

@@ -1,6 +1,8 @@
 param(
-    [string]$OriginalApk = "C:\Users\comma\Desktop\arc_dark\arcaea_6.14.12c.apk",
-    [string]$FixedApk = "C:\Users\comma\Desktop\arc_dark\fixed.apk",
+    [Parameter(Mandatory = $true)]
+    [string]$OriginalApk,
+    [Parameter(Mandatory = $true)]
+    [string]$FixedApk,
     [string]$OutputRoot = "$PSScriptRoot\..\app\src\main\assets"
 )
 
@@ -134,11 +136,11 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 $summary = [pscustomobject]@{
     originalApk = @{
-        path = $OriginalApk
+        fileName = Split-Path -Leaf $OriginalApk
         sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $OriginalApk).Hash.ToLowerInvariant()
     }
     fixedApk = @{
-        path = $FixedApk
+        fileName = Split-Path -Leaf $FixedApk
         sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $FixedApk).Hash.ToLowerInvariant()
     }
     includedAssets = $entries.Count

@@ -53,6 +53,59 @@ public final class PackCatalogTest {
         assertNull(entry);
     }
 
+    @Test
+    public void listDoesNotExposeRemovedTestPack() throws Exception {
+        File root = temporaryFolder.newFolder("root");
+        File packDir = ArcDarkPaths.packDir(root, "test_pkg");
+        File metadataDir = new File(packDir, "arc_overrides");
+        assertTrue(metadataDir.mkdirs());
+        ArcDarkFileOps.writeUtf8(new File(packDir, "pack.json"), "{"
+                + "\"formatVersion\":1,"
+                + "\"id\":\"test_pkg\","
+                + "\"name\":\"Removed Test Pack\""
+                + "}");
+        ArcDarkFileOps.writeUtf8(new File(metadataDir, "index.json"), "{\"entries\":[]}");
+
+        PackCatalog.Entry entry = find(PackCatalog.list(root), "test_pkg");
+
+        assertNull(entry);
+    }
+
+    @Test
+    public void listExposesBuiltInPairumuPack() throws Exception {
+        File root = temporaryFolder.newFolder("root");
+        File cover = temporaryFolder.newFile("cover.jpg");
+
+        PackCatalog.Entry entry = find(PackCatalog.list(root, cover), ArcDarkConstants.PAIRUMU_DARK_PACK_ID);
+
+        assertNotNull(entry);
+        assertEquals(ArcDarkConstants.PAIRUMU_DARK_PACK_NAME, entry.name);
+        assertEquals(ArcDarkConstants.PAIRUMU_DARK_PACK_VERSION, entry.version);
+        assertEquals(cover, entry.coverFile);
+        assertTrue(entry.available);
+        assertTrue(entry.builtIn);
+    }
+
+    @Test
+    public void listDoesNotExposeExternalPackWithBuiltInId() throws Exception {
+        File root = temporaryFolder.newFolder("root");
+        File packDir = ArcDarkPaths.packDir(root, ArcDarkConstants.PAIRUMU_DARK_PACK_ID);
+        File metadataDir = new File(packDir, "arc_overrides");
+        assertTrue(metadataDir.mkdirs());
+        ArcDarkFileOps.writeUtf8(new File(packDir, "pack.json"), "{"
+                + "\"formatVersion\":1,"
+                + "\"id\":\"" + ArcDarkConstants.PAIRUMU_DARK_PACK_ID + "\","
+                + "\"name\":\"External Collision\""
+                + "}");
+        ArcDarkFileOps.writeUtf8(new File(metadataDir, "index.json"), "{\"entries\":[]}");
+
+        PackCatalog.Entry entry = find(PackCatalog.list(root), ArcDarkConstants.PAIRUMU_DARK_PACK_ID);
+
+        assertNotNull(entry);
+        assertEquals(ArcDarkConstants.PAIRUMU_DARK_PACK_NAME, entry.name);
+        assertTrue(entry.builtIn);
+    }
+
     private static PackCatalog.Entry find(List<PackCatalog.Entry> entries, String id) {
         for (PackCatalog.Entry entry : entries) {
             if (entry.id.equals(id)) {

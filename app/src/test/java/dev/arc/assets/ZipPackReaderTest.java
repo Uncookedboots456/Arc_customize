@@ -114,6 +114,18 @@ public final class ZipPackReaderTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
+    public void readManifestRejectsBuiltInPackId() throws Exception {
+        ZipPackReader.readManifest(streamOf(zip(entry(
+                "pack.json",
+                "{"
+                        + "\"formatVersion\":1,"
+                        + "\"id\":\"" + ArcDarkConstants.PAIRUMU_DARK_PACK_ID + "\","
+                        + "\"name\":\"External Collision\""
+                        + "}"
+        ))));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
     public void readManifestRejectsOversizedPackJson() throws Exception {
         StringBuilder oversized = new StringBuilder();
         for (int i = 0; i < 70 * 1024; i++) {

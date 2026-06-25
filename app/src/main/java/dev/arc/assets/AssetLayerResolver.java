@@ -34,8 +34,8 @@ final class AssetLayerResolver {
                 continue;
             }
 
-            if (ArcDarkConstants.TEST_PACK_ID.equals(packId)) {
-                resolveTestLayer(moduleAssets, root, bundledIndex, providers, indexes, activeOrder, packId);
+            if (ArcDarkControl.isBuiltInPackId(packId)) {
+                resolveBuiltInLayer(moduleAssets, targetContext, providers, indexes, activeOrder, packId);
                 continue;
             }
 
@@ -47,29 +47,6 @@ final class AssetLayerResolver {
                 : new CompositeAssetProvider(providers.toArray(new AssetProvider[0]));
         AssetOverrideIndex activeIndex = AssetOverrideIndex.merge(indexes);
         return new ActiveAssetLayers(activeProvider, activeIndex, activeOrder);
-    }
-
-    private static void resolveTestLayer(
-            AssetManager moduleAssets,
-            File root,
-            AssetOverrideIndex bundledIndex,
-            List<AssetProvider> providers,
-            List<AssetOverrideIndex> indexes,
-            List<String> activeOrder,
-            String packId
-    ) {
-        try {
-            File packDir = TestPackSeeder.ensureTestPack(moduleAssets, root, bundledIndex);
-            FilePackProvider filePackProvider = new FilePackProvider(packDir, bundledIndex);
-            preflightProvider(filePackProvider, bundledIndex);
-            providers.add(filePackProvider);
-            indexes.add(bundledIndex);
-            activeOrder.add(packId);
-            XposedBridge.log("ArcDark: using test layer " + packDir);
-        } catch (Throwable throwable) {
-            XposedBridge.log("ArcDark: unable to use test_pkg layer");
-            XposedBridge.log(throwable);
-        }
     }
 
     private static void resolveImportedLayer(
@@ -95,6 +72,41 @@ final class AssetLayerResolver {
             XposedBridge.log("ArcDark: unable to use imported layer " + packId);
             XposedBridge.log(throwable);
         }
+    }
+
+    private static void resolveBuiltInLayer(
+            AssetManager moduleAssets,
+            Context targetContext,
+            List<AssetProvider> providers,
+            List<AssetOverrideIndex> indexes,
+            List<String> activeOrder,
+            String packId
+    ) {
+        try {
+            String assetRoot = builtInAssetRoot(packId);
+            AssetOverrideIndex packIndex = AssetOverrideIndex.load(
+                    moduleAssets,
+                    assetRoot + "/arc_overrides/index.json"
+            );
+            ModulePackProvider modulePackProvider =
+                    new ModulePackProvider(moduleAssets, targetContext, assetRoot, packIndex);
+            preflightProvider(modulePackProvider, packIndex);
+            providers.add(modulePackProvider);
+            indexes.add(packIndex);
+            activeOrder.add(packId);
+            XposedBridge.log("ArcDark: using built-in layer " + packId
+                    + " assets=" + packIndex.size());
+        } catch (Throwable throwable) {
+            XposedBridge.log("ArcDark: unable to use built-in layer " + packId);
+            XposedBridge.log(throwable);
+        }
+    }
+
+    private static String builtInAssetRoot(String packId) {
+        if (ArcDarkConstants.PAIRUMU_DARK_PACK_ID.equals(packId)) {
+            return ArcDarkConstants.BUILT_IN_PACK_ASSET_ROOT;
+        }
+        throw new IllegalArgumentException("Unknown built-in pack: " + packId);
     }
 
     private static void preflightProvider(AssetProvider provider, AssetOverrideIndex index) throws Exception {

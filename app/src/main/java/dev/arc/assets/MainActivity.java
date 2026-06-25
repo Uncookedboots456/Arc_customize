@@ -314,7 +314,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                wide ? dp(340) : dp(330)
+                wide ? dp(390) : dp(520)
         );
         listParams.topMargin = dp(16);
         panel.addView(listScroll, listParams);
@@ -426,7 +426,7 @@ public final class MainActivity extends Activity {
             row.addView(disable, disableParams);
         } else {
             Button enable = compactButton(text("enable"), view -> onPackEnabledChanged(entry.id, true));
-            boolean canEnable = entry.available || ArcDarkConstants.TEST_PACK_ID.equals(entry.id);
+            boolean canEnable = entry.available;
             enable.setEnabled(canEnable);
             enable.setAlpha(canEnable ? 1f : 0.5f);
             row.addView(enable, new LinearLayout.LayoutParams(dp(84), dp(48)));
@@ -719,7 +719,8 @@ public final class MainActivity extends Activity {
         if (snapshot.control.activePackOrder.isEmpty()) {
             return text("original");
         }
-        return snapshot.control.activePackOrder.get(0);
+        PackCatalog.Entry entry = findPackEntry(snapshot.control.activePackOrder.get(0));
+        return entry == null ? snapshot.control.activePackOrder.get(0) : entry.name;
     }
 
     private void rebuildPackList() {

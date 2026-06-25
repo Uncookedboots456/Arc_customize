@@ -19,28 +19,28 @@ public final class ArcDarkControlTest {
     }
 
     @Test
-    public void readJsonSupportsLegacyActivePackId() throws Exception {
+    public void readJsonIgnoresRemovedTestPackId() throws Exception {
         ArcDarkControl.Control control = ArcDarkControl.readJson(
                 "{"
                         + "\"injection_enabled\":false,"
-                        + "\"active_pack_id\":\"" + ArcDarkConstants.TEST_PACK_ID + "\""
+                        + "\"active_pack_id\":\"test_pkg\""
                         + "}"
         );
 
         assertFalse(control.injectionEnabled);
-        assertEquals(Collections.singletonList(ArcDarkConstants.TEST_PACK_ID), control.activePackOrder);
+        assertEquals(Collections.emptyList(), control.activePackOrder);
     }
 
     @Test
-    public void readJsonFallsBackToLegacyActivePackIdWhenOrderIsInvalid() throws Exception {
+    public void readJsonDoesNotFallBackToRemovedTestPackIdWhenOrderIsInvalid() throws Exception {
         ArcDarkControl.Control control = ArcDarkControl.readJson(
                 "{"
-                        + "\"active_pack_id\":\"" + ArcDarkConstants.TEST_PACK_ID + "\","
+                        + "\"active_pack_id\":\"test_pkg\","
                         + "\"active_pack_order\":[\"bad/slash\"]"
                         + "}"
         );
 
-        assertEquals(Collections.singletonList(ArcDarkConstants.TEST_PACK_ID), control.activePackOrder);
+        assertEquals(Collections.emptyList(), control.activePackOrder);
     }
 
     @Test
@@ -50,6 +50,7 @@ public final class ArcDarkControlTest {
                         + "\"active_pack_order\":["
                         + "\"bad/slash\","
                         + "\"" + ArcDarkConstants.DEFAULT_PACK_ID + "\","
+                        + "\"" + ArcDarkConstants.PAIRUMU_DARK_PACK_ID + "\","
                         + "\"sample_pack\","
                         + "\"pending.tmp\""
                         + "]"
@@ -57,8 +58,21 @@ public final class ArcDarkControlTest {
         );
 
         assertEquals(
-                Collections.singletonList("sample_pack"),
+                Arrays.asList(ArcDarkConstants.PAIRUMU_DARK_PACK_ID, "sample_pack"),
                 control.activePackOrder
         );
+    }
+
+    @Test
+    public void builtInPackIdIsAllowedButNotExternal() {
+        assertTrue(ArcDarkControl.isAllowedPackId(ArcDarkConstants.PAIRUMU_DARK_PACK_ID));
+        assertTrue(ArcDarkControl.isBuiltInPackId(ArcDarkConstants.PAIRUMU_DARK_PACK_ID));
+        assertFalse(ArcDarkControl.isExternalPackId(ArcDarkConstants.PAIRUMU_DARK_PACK_ID));
+    }
+
+    @Test
+    public void removedTestPackIdIsNotAllowedOrExternal() {
+        assertFalse(ArcDarkControl.isAllowedPackId("test_pkg"));
+        assertFalse(ArcDarkControl.isExternalPackId("test_pkg"));
     }
 }

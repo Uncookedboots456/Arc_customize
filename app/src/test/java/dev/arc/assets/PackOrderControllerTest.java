@@ -16,12 +16,12 @@ public final class PackOrderControllerTest {
         );
 
         ArcDarkControl.Control enabled =
-                PackOrderController.setPackEnabled(control, ArcDarkConstants.TEST_PACK_ID, true);
+                PackOrderController.setPackEnabled(control, "sample_pack", true);
         ArcDarkControl.Control disabled =
-                PackOrderController.setPackEnabled(enabled, ArcDarkConstants.TEST_PACK_ID, false);
+                PackOrderController.setPackEnabled(enabled, "sample_pack", false);
 
         assertEquals(
-                Collections.singletonList(ArcDarkConstants.TEST_PACK_ID),
+                Collections.singletonList("sample_pack"),
                 enabled.activePackOrder
         );
         assertEquals(Collections.<String>emptyList(), disabled.activePackOrder);
@@ -31,20 +31,20 @@ public final class PackOrderControllerTest {
     public void setPackEnabledDoesNotDuplicateExistingPack() {
         ArcDarkControl.Control control = new ArcDarkControl.Control(
                 true,
-                Collections.singletonList(ArcDarkConstants.TEST_PACK_ID)
+                Collections.singletonList("sample_pack")
         );
 
         ArcDarkControl.Control next =
-                PackOrderController.setPackEnabled(control, ArcDarkConstants.TEST_PACK_ID, true);
+                PackOrderController.setPackEnabled(control, "sample_pack", true);
 
-        assertEquals(Collections.singletonList(ArcDarkConstants.TEST_PACK_ID), next.activePackOrder);
+        assertEquals(Collections.singletonList("sample_pack"), next.activePackOrder);
     }
 
     @Test
     public void movePackReordersWithinBoundsOnly() {
         ArcDarkControl.Control control = new ArcDarkControl.Control(
                 true,
-                Arrays.asList(ArcDarkConstants.TEST_PACK_ID, "sample_pack")
+                Arrays.asList(ArcDarkConstants.PAIRUMU_DARK_PACK_ID, "sample_pack")
         );
 
         ArcDarkControl.Control moved =
@@ -53,7 +53,7 @@ public final class PackOrderControllerTest {
                 PackOrderController.movePack(moved, "sample_pack", -1);
 
         assertEquals(
-                Arrays.asList("sample_pack", ArcDarkConstants.TEST_PACK_ID),
+                Arrays.asList("sample_pack", ArcDarkConstants.PAIRUMU_DARK_PACK_ID),
                 moved.activePackOrder
         );
         assertEquals(moved.activePackOrder, unchanged.activePackOrder);
@@ -63,13 +63,13 @@ public final class PackOrderControllerTest {
     public void withPackAtFrontMovesExistingPackWithoutDuplicate() {
         ArcDarkControl.Control control = new ArcDarkControl.Control(
                 true,
-                Arrays.asList("sample_pack", ArcDarkConstants.TEST_PACK_ID)
+                Arrays.asList("sample_pack", ArcDarkConstants.PAIRUMU_DARK_PACK_ID)
         );
 
-        ArcDarkControl.Control next = PackOrderController.withPackAtFront(control, ArcDarkConstants.TEST_PACK_ID);
+        ArcDarkControl.Control next = PackOrderController.withPackAtFront(control, ArcDarkConstants.PAIRUMU_DARK_PACK_ID);
 
         assertEquals(
-                Arrays.asList(ArcDarkConstants.TEST_PACK_ID, "sample_pack"),
+                Arrays.asList(ArcDarkConstants.PAIRUMU_DARK_PACK_ID, "sample_pack"),
                 next.activePackOrder
         );
     }

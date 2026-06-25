@@ -28,6 +28,10 @@ final class AssetOverrideIndex {
         return load(moduleAssets.open(INDEX_ASSET));
     }
 
+    static AssetOverrideIndex load(AssetManager moduleAssets, String indexAssetPath) throws Exception {
+        return load(moduleAssets.open(indexAssetPath));
+    }
+
     static AssetOverrideIndex load(File indexFile) throws Exception {
         return load(new FileInputStream(indexFile));
     }

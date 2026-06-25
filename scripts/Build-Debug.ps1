@@ -1,10 +1,18 @@
 $ErrorActionPreference = "Stop"
 
-$sdk = "C:\Users\comma\AppData\Local\Android\Sdk"
-$gradle = "C:\Users\comma\.gradle\wrapper\dists\gradle-8.14-bin\38aieal9i53h9rfe7vjup95b9\gradle-8.14\bin\gradle.bat"
+$workspaceRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$gradle = Join-Path $workspaceRoot "gradlew.bat"
 
-$env:ANDROID_HOME = $sdk
-$env:ANDROID_SDK_ROOT = $sdk
+if (-not (Test-Path -LiteralPath $gradle -PathType Leaf)) {
+    throw "Missing Gradle Wrapper: $gradle"
+}
+
+if (-not $env:ANDROID_HOME -and $env:ANDROID_SDK_ROOT) {
+    $env:ANDROID_HOME = $env:ANDROID_SDK_ROOT
+}
+if (-not $env:ANDROID_SDK_ROOT -and $env:ANDROID_HOME) {
+    $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
+}
 $env:JAVA_TOOL_OPTIONS = "--enable-native-access=ALL-UNNAMED"
 
 & $gradle --no-daemon :app:assembleDebug

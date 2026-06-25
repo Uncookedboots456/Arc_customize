@@ -1,0 +1,21 @@
+{
+    "source":  "built_in_apk_diff",
+    "packId":  "pairumu_cat_dark",
+    "originalApk":  {
+                        "fileName":  "arcaea_6.15.0c.apk",
+                        "packageName":  "moe.low.arc",
+                        "versionName":  "6.15.0c",
+                        "sha256":  "d20c7a1b8f227a275d39829ad660b77a647c0f0491b5d90c8e6354524ae8beb3"
+                    },
+    "fixedApk":  {
+                     "fileName":  "base.apk.1",
+                     "packageName":  "moe.low.ard",
+                     "versionName":  "6.15.0c",
+                     "sha256":  "6d59ee30872d78a875d159ce5584df1c21021ec86c97083104d915c9ad6313e7"
+                 },
+    "sameNameChangedAssets":  296,
+    "sameNameUnchangedAssets":  6425,
+    "fixedOnlyAssetsExcluded":  60,
+    "includedPolicy":  "Only same-name assets with different SHA-256 content are included. Assets only present in the fixed APK are excluded.",
+    "generatedAtUtc":  "2026-06-25T11:37:00.7373782Z"
+}

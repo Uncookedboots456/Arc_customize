@@ -4,10 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 
 final class PackMetadataWriter {
     private static final String MANIFEST_ENTRY = "pack.json";
@@ -51,20 +48,6 @@ final class PackMetadataWriter {
         summary.put("generatedAtUtc", importedAt);
         summary.put("includedPolicy", "Only safe root cover files and mapped assets/ files are imported.");
         ArcDarkFileOps.writeUtf8(new File(metadataDir, "summary.json"), summary.toString(2));
-    }
-
-    static void writeTestPackManifest(File packDir, int assetCount) throws Exception {
-        JSONObject root = new JSONObject();
-        root.put("id", ArcDarkConstants.TEST_PACK_ID);
-        root.put("name", ArcDarkConstants.TEST_PACK_ID);
-        root.put("source", ArcDarkConstants.DEFAULT_PACK_ID);
-        root.put("assetCount", assetCount);
-        root.put(
-                "generatedAt",
-                new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(new Date())
-        );
-
-        ArcDarkFileOps.writeUtf8(new File(packDir, MANIFEST_ENTRY), root.toString(2));
     }
 
     private static JSONObject toIndexJson(AssetOverride entry) throws Exception {

@@ -6,3 +6,11 @@ local.properties
 /codex.md
 dist/
 logs/
+.ai-bridge/
+.github/modernize/
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key

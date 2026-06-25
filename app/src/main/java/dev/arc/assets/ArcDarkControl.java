@@ -15,6 +15,7 @@ final class ArcDarkControl {
     static final String KEY_INJECTION_ENABLED = "injection_enabled";
     static final String KEY_ACTIVE_PACK_ID = "active_pack_id";
     static final String KEY_ACTIVE_PACK_ORDER = "active_pack_order";
+    private static final String REMOVED_TEST_PACK_ID = "test_pkg";
 
     private ArcDarkControl() {
     }
@@ -105,8 +106,12 @@ final class ArcDarkControl {
     }
 
     static boolean isAllowedPackId(String packId) {
-        return ArcDarkConstants.TEST_PACK_ID.equals(packId)
+        return isBuiltInPackId(packId)
                 || isExternalPackId(packId);
+    }
+
+    static boolean isBuiltInPackId(String packId) {
+        return ArcDarkConstants.PAIRUMU_DARK_PACK_ID.equals(packId);
     }
 
     static boolean isExternalPackId(String packId) {
@@ -114,7 +119,8 @@ final class ArcDarkControl {
             return false;
         }
         if (ArcDarkConstants.DEFAULT_PACK_ID.equals(packId)
-                || ArcDarkConstants.TEST_PACK_ID.equals(packId)
+                || REMOVED_TEST_PACK_ID.equals(packId)
+                || isBuiltInPackId(packId)
                 || ".".equals(packId)
                 || "..".equals(packId)
                 || packId.endsWith(".tmp")

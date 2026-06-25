@@ -55,7 +55,6 @@ final class ArcDarkRuntimeInstaller {
                     + root);
 
             if (!control.injectionEnabled) {
-                TestPackSeeder.ensureTestPackAsync(moduleAssets, root, index);
                 installed = true;
                 XposedBridge.log("ArcDark: injection disabled by control; hooks not installed");
                 return;
@@ -64,7 +63,6 @@ final class ArcDarkRuntimeInstaller {
             ActiveAssetLayers activeLayers =
                     AssetLayerResolver.resolve(moduleAssets, targetContext, root, index, control);
             if (activeLayers.index.size() == 0) {
-                TestPackSeeder.ensureTestPackAsync(moduleAssets, root, index);
                 installed = true;
                 XposedBridge.log("ArcDark: no active asset overrides; original game assets remain in use");
                 return;
