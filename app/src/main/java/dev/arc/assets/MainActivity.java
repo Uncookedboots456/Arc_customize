@@ -17,6 +17,7 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.FrameLayout;
@@ -46,7 +47,6 @@ public final class MainActivity extends Activity {
     private Switch injectionSwitch;
     private LinearLayout enabledPackList;
     private LinearLayout disabledPackList;
-    private View packListScrollView;
     private Button openTargetButton;
     private UiStatusSnapshot snapshot;
     private Palette palette;
@@ -103,7 +103,7 @@ public final class MainActivity extends Activity {
         palette = Palette.forMode(lightTheme);
         boolean wide = isWideLayout();
 
-        RootScrollView scroll = new RootScrollView(this);
+        ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(palette.background);
 
@@ -127,7 +127,6 @@ public final class MainActivity extends Activity {
 
         View injectionPanel = createInjectionPanel();
         View packPanel = createPackPanel(wide);
-        scroll.setLockedChild(packListScrollView);
         if (wide) {
             main.addView(injectionPanel, new LinearLayout.LayoutParams(
                     0,
@@ -298,7 +297,6 @@ public final class MainActivity extends Activity {
         listScroll.setVerticalScrollBarEnabled(true);
         listScroll.setScrollbarFadingEnabled(false);
         listScroll.setNestedScrollingEnabled(false);
-        packListScrollView = listScroll;
         LinearLayout listContent = vertical();
         listScroll.addView(listContent, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
@@ -1008,72 +1006,31 @@ public final class MainActivity extends Activity {
         return Color.parseColor(value);
     }
 
-    private final class RootScrollView extends ScrollView {
-        private View lockedChild;
-        private boolean lockedGesture;
-        private final int[] selfLocation = new int[2];
-        private final int[] childLocation = new int[2];
-
-        RootScrollView(Context context) {
-            super(context);
-        }
-
-        void setLockedChild(View child) {
-            lockedChild = child;
-        }
-
-        @Override
-        public boolean onInterceptTouchEvent(MotionEvent event) {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                lockedGesture = isInsideLockedChild(event);
-            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                lockedGesture = false;
-            }
-            return !lockedGesture && super.onInterceptTouchEvent(event);
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            if (lockedGesture) {
-                int action = event.getActionMasked();
-                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                    lockedGesture = false;
-                }
-                return false;
-            }
-            return super.onTouchEvent(event);
-        }
-
-        private boolean isInsideLockedChild(MotionEvent event) {
-            if (lockedChild == null || !lockedChild.isShown()) {
-                return false;
-            }
-            getLocationOnScreen(selfLocation);
-            lockedChild.getLocationOnScreen(childLocation);
-            float rawX = selfLocation[0] + event.getX();
-            float rawY = selfLocation[1] + event.getY();
-            return rawX >= childLocation[0]
-                    && rawX <= childLocation[0] + lockedChild.getWidth()
-                    && rawY >= childLocation[1]
-                    && rawY <= childLocation[1] + lockedChild.getHeight();
-        }
-    }
-
     private final class LockingScrollView extends ScrollView {
         private boolean lockParentScroll;
+        private float lastY;
+        private final int touchSlop;
 
         LockingScrollView(Context context) {
             super(context);
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         }
 
         @Override
         public boolean dispatchTouchEvent(MotionEvent event) {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
+                lastY = event.getY();
                 lockParentScroll = canScrollVertically(-1) || canScrollVertically(1);
                 getParent().requestDisallowInterceptTouchEvent(lockParentScroll);
             } else if (action == MotionEvent.ACTION_MOVE) {
+                float deltaY = event.getY() - lastY;
+                if (Math.abs(deltaY) > touchSlop) {
+                    lockParentScroll = deltaY < 0
+                            ? canScrollVertically(1)
+                            : canScrollVertically(-1);
+                    lastY = event.getY();
+                }
                 getParent().requestDisallowInterceptTouchEvent(lockParentScroll);
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 lockParentScroll = false;

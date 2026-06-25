@@ -6,7 +6,7 @@ LSPosed/Xposed module for applying Arc customize material overrides to the offic
 
 - Module package: `dev.arc.assets`
 - Target package / LSPosed scope: `moe.low.arc`
-- Version: `0.5`
+- Version: `0.5.1`
 - Asset overrides: 348
 - Supported ABI: `arm64-v8a`, `armeabi-v7a`
 - Runtime root: `/sdcard/Android/media/moe.low.arc/ArcDark/`

@@ -22,7 +22,7 @@ Arc customize 的 MVP 架构已经完成并通过设备验证。当前路线保�
 
 - 模块包名：`dev.arc.assets`
 - 目标包名 / LSPosed 作用域：`moe.low.arc`
-- 版本：`0.5 (5)`
+- 版本：`0.5.1 (6)`
 - native ABI：`arm64-v8a`, `armeabi-v7a`
 - 覆盖素材数量：348
 - 应用可见名称：`Arc customize`

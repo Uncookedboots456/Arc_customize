@@ -14,3 +14,7 @@ logs/
 *.pfx
 *.pem
 *.key
+CONTRIBUTING.md
+SECURITY.md
+design.md
+docs/open-source-release-checklist.md
