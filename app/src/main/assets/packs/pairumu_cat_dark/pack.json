@@ -1,11 +1,10 @@
 {
-    "formatVersion":  1,
-    "id":  "pairumu_cat_dark",
-    "name":  "娲惧皵濮嗙尗_dark",
-    "version":  "6.15.0c",
-    "description":  "Built-in 6.15.0c material differences generated from same-name changed assets.",
-    "author":  "Arc customize",
-    "cover":  "cover.jpg",
-    "assetCount":  296,
-    "generatedAtUtc":  "2026-06-25T11:37:00.7373782Z"
+  "formatVersion": 2,
+  "id": "pairumu_cat_dark",
+  "name": "派尔姆猫_dark",
+  "version": "6.16.0c",
+  "description": "Index-only built-in pack using verified official aliases and generated transparent textures.",
+  "author": "Arc customize",
+  "cover": "",
+  "assetCount": 296
 }

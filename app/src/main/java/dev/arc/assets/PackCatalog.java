@@ -21,7 +21,7 @@ final class PackCatalog {
                 ArcDarkConstants.PAIRUMU_DARK_PACK_ID,
                 ArcDarkConstants.PAIRUMU_DARK_PACK_NAME,
                 ArcDarkConstants.PAIRUMU_DARK_PACK_VERSION,
-                "Built into the module APK",
+                "Index-only pack · cover loaded from installed game",
                 "",
                 builtInCoverFile != null && builtInCoverFile.isFile() ? builtInCoverFile : null,
                 true,

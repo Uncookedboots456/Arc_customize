@@ -6,6 +6,7 @@ local.properties
 /codex.md
 dist/
 logs/
+/work/
 .ai-bridge/
 .github/modernize/
 *.jks

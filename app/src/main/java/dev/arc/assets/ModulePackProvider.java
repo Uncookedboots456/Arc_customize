@@ -32,12 +32,20 @@ final class ModulePackProvider implements AssetProvider {
     @Override
     public InputStream open(String assetPath) throws Exception {
         AssetOverride override = require(assetPath);
+        if (override.isIndexed()) {
+            return new java.io.FileInputStream(
+                    IndexedAssetMaterializer.materialize(targetContext, override)
+            );
+        }
         return moduleAssets.open(assetRoot + "/" + override.modulePath);
     }
 
     @Override
     public File materialize(String assetPath) throws Exception {
         AssetOverride override = require(assetPath);
+        if (override.isIndexed()) {
+            return IndexedAssetMaterializer.materialize(targetContext, override);
+        }
         File root = new File(targetContext.getCacheDir(), "arc_dark_module_packs");
         File file = new File(root, override.sha256);
 

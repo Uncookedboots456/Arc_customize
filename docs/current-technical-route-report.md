@@ -2,7 +2,7 @@
 
 ## 结论摘要
 
-Arc customize 的 MVP 架构已经完成并通过设备验证。当前路线保持官方 Arcaea 包 `moe.low.arc` 不变，通过 LSPosed 注入目标进程，在运行时替换 348 个素材。
+Arc customize 0.6 保持官方 Arcaea 包 `moe.low.arc` 不变，通过 LSPosed 注入目标进程，并以不随模块分发游戏图片的索引规则在运行时提供素材。
 
 当前已验证能力：
 
@@ -10,7 +10,7 @@ Arc customize 的 MVP 架构已经完成并通过设备验证。当前路线保�
 - 注入开关可控制是否安装 hook。
 - 素材包列表为可滚动覆盖栈，包含内置 `派尔姆猫_dark` 和导入的第三方 ZIP 包；旧 `<default>/bundled` 与内置测试包行不再显示。
 - UI 用 `当前修改素材 / Difference` 展示当前 348 个替换素材数量。
-- 内置 `pairumu_cat_dark` 会在目标进程中 materialize 为可读缓存文件。
+- 内置 `pairumu_cat_dark` 包含 170 条官方资源别名、124 条透明图生成和 2 条同路径直通规则；模块 APK 不再携带游戏图片。
 - 第三方 ZIP 包由 UI 选择后通过 URI 授权交给目标进程解包到 `packs/<packId>/`。
 - 生效顺序由 `active_pack_order` 控制，从上到下查找；全部缺失时保留游戏原始素材。
 - `active_pack_order` 可为空，表示不启用任何素材包并使用游戏原始资源。
@@ -22,7 +22,7 @@ Arc customize 的 MVP 架构已经完成并通过设备验证。当前路线保�
 
 - 模块包名：`dev.arc.assets`
 - 目标包名 / LSPosed 作用域：`moe.low.arc`
-- 版本：`0.5.1 (6)`
+- 版本：`0.6 (7)`
 - native ABI：`arm64-v8a`, `armeabi-v7a`
 - 覆盖素材数量：348
 - 应用可见名称：`Arc customize`
@@ -75,9 +75,9 @@ ArcDark/
 
 ## 素材包与 Hook 路线
 
-`difference` 是项目侧当前修改素材包，保存在仓库 `Arc_dark/packs/difference/`，包含 `pack.json`、`arc_overrides/index.json`、`img/` 和 `models/`。它用于把当前 348 个替换素材整理为标准资源包形式，不作为 Android UI 中的 selectable runtime pack。
+`difference` 是项目侧当前兼容索引，保存在仓库 `Arc_dark/packs/difference/`，只包含 `pack.json` 和 `arc_overrides/` 元数据。348 条规则由 167 条官方别名、179 条透明图生成和 2 条同路径直通组成，不包含游戏图片，也不作为 Android UI 中的 selectable runtime pack。
 
-`pairumu_cat_dark` 是模块 APK 内置可选素材包，UI 显示为 `派尔姆猫_dark`。它由 `scripts/Generate-BuiltInPack.ps1` 从 `arcaea_6.15.0c.apk` 与改包 `base.apk.1` 对比生成，只包含同名 `assets/` 文件中 SHA-256 不同的 296 个素材；改包独有的 60 个 `assets/` 文件记录在 summary 中但不导入。封面来自 `default_jacket_256.jpg`，打包为内置 `cover.jpg`。该 ID 为保留内置 ID，第三方 ZIP 不可复用。
+`pairumu_cat_dark` 是模块 APK 内置可选索引包，UI 显示为 `派尔姆猫_dark`。针对 Arcaea `6.16.0c`，296 条规则由 170 条官方别名、124 条透明图生成和 2 条同路径直通组成。官方源文件从用户已安装的游戏读取，按大小和 SHA-256 校验后只缓存在本机；透明 PNG 在设备上生成。模块不携带游戏图片或封面，UI 封面同样从已安装游戏读取并校验后显示。该 ID 为保留内置 ID，第三方 ZIP 不可复用。
 
 第三方素材包是部分覆盖包。每个包拥有自己的 `arc_overrides/index.json`，条目来自 ZIP 内允许目录下的 `assets/...` 文件。`pack.json` 可包含 `version`、`description`、`author`、`cover` 和 `Change`；`formatVersion` 只用于导入格式兼容判断，`version` 是 UI 显示用的自定义素材包版本。`Change` 把 ZIP 源文件夹映射到目标素材文件夹，未声明的默认文件夹按同名目录导入。激活时模块按 `active_pack_order` 合成最终 native map：同一个 `assetPath` 只采用最高优先级层；没有任何启用层命中的路径不进入 map，继续由游戏原始资源处理。
 
@@ -94,14 +94,18 @@ Hook 路线：
 
 ## 验证证据
 
-最后一轮设备验证结果（2026-06-25）：
+最后一轮设备验证结果（2026-07-31）：
 
 - `:app:testDebugUnitTest` 与 `:app:assembleDebug` 作为当前回归基线。
 - debug APK 启动后 UI 显示 `Arc customize`、`当前修改素材 348`，运行路径仍为 `/storage/emulated/0/Android/media/moe.low.arc/ArcDark`。
 - UI 不再出现 `bundled`、`<default>` 或内置测试包资源项目。
-- UI 展示内置 `派尔姆猫_dark`，封面由模块 APK 的 `cover.jpg` materialize 到缓存后提供给列表。
+- UI 从已安装游戏读取并校验 `img/default_jacket_256.jpg` 后展示 `派尔姆猫_dark` 封面，模块 APK 不内置该图片。
 - 启用 `派尔姆猫_dark` 后，`pairumu_cat_dark` 进入覆盖栈并注册 296 个 native 覆盖项。
+- 对 split 安装的 Arcaea，官方源会在 `files/cb/active` 和 APK/split assets 之间安全回退，并逐个校验大小与 SHA-256。
+- 冷缓存启动生成 12 个官方源缓存、33 个透明尺寸缓存，native 实际命中 `img/track.png`、`img/note.png`、`models/tap_l.png` 等覆盖项。
 - 禁用最后一个启用素材包后，`active_pack_order` 应为空且目标回到原始资源。
+
+完整记录见 `docs/evidence/arc-customize-0.6-device-validation.md`。
 
 ## 构建与回归
 
@@ -116,7 +120,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Build-Debug.ps1
 - 安装 debug APK 后能解析并启动 `dev.arc.assets/.MainActivity`。
 - UI 中显示注入开关、当前修改素材数量、`派尔姆猫_dark`、刷新、复制诊断、Open Arcaea。
 - `Open Arcaea` 能把 UI 当前配置应用到目标侧 `ArcDark/control.json`。
-- `派尔姆猫_dark` 启用时 native source sample 指向 `pairumu_cat_dark` materialize 后的缓存文件。
+- `派尔姆猫_dark` 启用时 native source sample 指向经校验的官方源缓存或设备生成的透明 PNG。
 - 进入谱面加载时至少出现 `img/track.png`、`img/note.png`、`models/tap_l.png` 的 native asset hit。
 - 注入关闭时不安装 hook。
 - 禁用最后一个启用素材包后，`active_pack_order` 应为空且目标回到原始资源。

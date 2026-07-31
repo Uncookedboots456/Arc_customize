@@ -25,12 +25,20 @@ final class BundledAssetProvider implements AssetProvider {
     @Override
     public InputStream open(String assetPath) throws Exception {
         AssetOverride override = require(assetPath);
+        if (override.isIndexed()) {
+            return new java.io.FileInputStream(
+                    IndexedAssetMaterializer.materialize(targetContext, override)
+            );
+        }
         return moduleAssets.open(override.modulePath);
     }
 
     @Override
     public File materialize(String assetPath) throws Exception {
         AssetOverride override = require(assetPath);
+        if (override.isIndexed()) {
+            return IndexedAssetMaterializer.materialize(targetContext, override);
+        }
         File root = new File(targetContext.getCacheDir(), "arc_dark_assets");
         File file = new File(root, override.sha256);
 

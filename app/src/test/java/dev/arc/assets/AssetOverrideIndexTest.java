@@ -40,6 +40,71 @@ public final class AssetOverrideIndexTest {
         loadIndex(entry("../img/note.png", "img/note.png", 3, "aaa"));
     }
 
+    @Test
+    public void loadSupportsOfficialAlias() throws Exception {
+        AssetOverrideIndex index = loadIndex(
+                "{"
+                        + "\"assetPath\":\"assets/img/note.png\","
+                        + "\"mode\":\"alias\","
+                        + "\"sourceAssetPath\":\"assets/img/note_dark.png\","
+                        + "\"sourceSize\":42,"
+                        + "\"sourceSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+                        + "}"
+        );
+
+        AssetOverride override = index.find("img/note.png");
+        assertNotNull(override);
+        assertEquals(AssetOverride.MODE_ALIAS, override.mode);
+        assertEquals("assets/img/note_dark.png", override.sourceAssetPath);
+        assertEquals(42, override.size);
+    }
+
+    @Test
+    public void loadSupportsTransparentGeneration() throws Exception {
+        AssetOverrideIndex index = loadIndex(
+                "{"
+                        + "\"assetPath\":\"assets/img/clear.png\","
+                        + "\"mode\":\"transparent\","
+                        + "\"width\":1920,"
+                        + "\"height\":720"
+                        + "}"
+        );
+
+        AssetOverride override = index.find("img/clear.png");
+        assertEquals(AssetOverride.MODE_TRANSPARENT, override.mode);
+        assertEquals(1920, override.width);
+        assertEquals(720, override.height);
+    }
+
+    @Test
+    public void loadSupportsSamePathPassthrough() throws Exception {
+        AssetOverrideIndex index = loadIndex(
+                "{"
+                        + "\"assetPath\":\"assets/img/card_mask.png\","
+                        + "\"mode\":\"passthrough\","
+                        + "\"sourceSize\":12,"
+                        + "\"sourceSha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\""
+                        + "}"
+        );
+
+        AssetOverride override = index.find("img/card_mask.png");
+        assertEquals(AssetOverride.MODE_PASSTHROUGH, override.mode);
+        assertEquals(override.assetPath, override.sourceAssetPath);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void loadRejectsUnsafeAliasSource() throws Exception {
+        loadIndex(
+                "{"
+                        + "\"assetPath\":\"assets/img/note.png\","
+                        + "\"mode\":\"alias\","
+                        + "\"sourceAssetPath\":\"../img/note_dark.png\","
+                        + "\"sourceSize\":42,"
+                        + "\"sourceSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+                        + "}"
+        );
+    }
+
     private static AssetOverrideIndex loadIndex(String entries) throws Exception {
         String json = "{\"entries\":[" + entries + "]}";
         return AssetOverrideIndex.load(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));

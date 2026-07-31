@@ -6,8 +6,8 @@ LSPosed/Xposed module for applying Arc customize material overrides to the offic
 
 - Module package: `dev.arc.assets`
 - Target package / LSPosed scope: `moe.low.arc`
-- Version: `0.5.1`
-- Asset overrides: 348
+- Version: `0.6`
+- Indexed compatibility rules: 348
 - Supported ABI: `arm64-v8a`, `armeabi-v7a`
 - Runtime root: `/sdcard/Android/media/moe.low.arc/ArcDark/`
 - Project-side current material pack: `Arc_dark/packs/difference/`
@@ -17,8 +17,8 @@ The launcher UI is titled `Arc customize` and provides an injection switch, a cu
 
 ## Material Packs
 
-- `difference` is the project-side current material difference pack under `Arc_dark/packs/difference/`. It mirrors the 348 bundled override entries for project organization and is not shown as a selectable runtime pack.
-- `pairumu_cat_dark` is bundled inside the module APK as `派尔姆猫_dark`. It contains 296 same-name asset differences generated from Arcaea `6.15.0c`, includes `cover.jpg`, and ZIP imports cannot reuse this reserved ID.
+- `difference` is the project-side 348-entry compatibility index under `Arc_dark/packs/difference/`. It contains no game images and is not shown as a selectable runtime pack.
+- `pairumu_cat_dark` is the selectable index-only pack shown as `派尔姆猫_dark`. For Arcaea `6.16.0c` it contains 170 verified aliases to installed official assets, 124 generated transparent textures, and 2 same-path passthrough rules. No gameplay image or cover is bundled; the UI loads its verified cover from the installed game. ZIP imports cannot reuse this reserved ID.
 
 Third-party packs are imported from ZIP files. A ZIP pack must contain root-level `pack.json` plus files under allowed `assets/` folders. Optional `version`, `description`, `author`, and root-level `cover` metadata are shown in the UI. `formatVersion` is the import format version; `version` is free-form pack display metadata.
 
@@ -38,7 +38,7 @@ Example `pack.json`:
   "id": "sample_pack",
   "name": "Arc Dark Sample Pack",
   "version": "1.0",
-  "description": "Small import test pack generated from bundled Arc Dark assets.",
+  "description": "Example third-party material pack.",
   "author": "Arc Dark",
   "cover": "cover.png",
   "Change": {
@@ -64,14 +64,6 @@ The UI stores its local control file under `dev.arc.assets`. Pressing Open Arcae
 ```
 
 Later Arcaea restarts reuse that target-side control file.
-
-## Sample Pack
-
-The repository root contains `arc-dark-sample-pack.zip`, a small import smoke-test pack generated from bundled assets. Regenerate it with:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Generate-SamplePack.ps1
-```
 
 ## Build
 
@@ -101,30 +93,13 @@ arcCustomizeKeyPassword=...
 
 Equivalent environment variables are `ARC_CUSTOMIZE_STORE_FILE`, `ARC_CUSTOMIZE_STORE_PASSWORD`, `ARC_CUSTOMIZE_KEY_ALIAS`, and `ARC_CUSTOMIZE_KEY_PASSWORD`.
 
-## Regenerate Assets
+## Rebuild an Index
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Generate-AssetOverrides.ps1 `
-  -OriginalApk C:\path\to\original.apk `
-  -FixedApk C:\path\to\modified.apk
-```
-
-The script writes generated metadata to `app/src/main/assets/arc_overrides` plus override files at the module asset root, such as `app/src/main/assets/img/...`. It stores only input file names and hashes in generated metadata, not local absolute paths.
-
-Regenerate the built-in `派尔姆猫_dark` pack with:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Generate-BuiltInPack.ps1 `
-  -OriginalApk C:\Users\comma\Desktop\arcaea_6.15.0c.apk `
-  -FixedApk C:\Users\comma\Desktop\base.apk.1
-```
-
-This writes `app/src/main/assets/packs/pairumu_cat_dark/` and includes only same-name `assets/` files whose SHA-256 differs between the original and fixed APK. Assets present only in the fixed APK are recorded in summary metadata but excluded from the pack.
-The generated pack also copies `C:\Users\comma\Desktop\assets\img\default_jacket_256.jpg` as `cover.jpg`.
+`scripts/Find-AssetHashMapping.py` compares a locally held legacy pack with unpacked official assets. `scripts/Build-IndexedOverridePack.py` converts the verified report into format-version-2 `alias`, `transparent`, and `passthrough` entries. The legacy images and official APK remain local inputs and must not be copied into the repository or release APK.
 
 ## Runtime Notes
 
-The module keeps the LSPosed scope at `moe.low.arc`. Java `AssetManager.open/openFd` hooks remain as a fallback, and `libarcdarkhook.so` hooks Cocos native calls to `AAssetManager_open`, `AAsset_read`, `AAsset_getLength`, and `AAsset_close`.
+The module keeps the LSPosed scope at `moe.low.arc`. Indexed official sources and the built-in pack cover are read from the user's installed game, verified by size and SHA-256, and cached only on that device; transparent textures are generated on-device. Java `AssetManager.open/openFd` hooks remain as a fallback, and `libarcdarkhook.so` hooks Cocos native calls to `AAssetManager_open`, `AAsset_read`, `AAsset_getLength`, and `AAsset_close`.
 
 Do not restore `System.load` or `System.loadLibrary` hooks; the current route uses delayed `xhook_refresh()` instead.
 

@@ -45,14 +45,48 @@ final class AssetOverrideIndex {
         for (int i = 0; i < entries.length(); i++) {
             JSONObject item = entries.getJSONObject(i);
             String assetPath = normalizeIndexPath(item.getString("assetPath"), "assetPath");
-            String modulePath = normalizeIndexPath(item.getString("modulePath"), "modulePath");
-            AssetOverride override = new AssetOverride(
-                    assetPath,
-                    modulePath,
-                    item.getLong("size"),
-                    item.getString("sha256"),
-                    item.optBoolean("materialize", true)
-            );
+            String mode = item.optString("mode", AssetOverride.MODE_BUNDLED);
+            AssetOverride override;
+            if (AssetOverride.MODE_BUNDLED.equals(mode)) {
+                String modulePath = normalizeIndexPath(item.getString("modulePath"), "modulePath");
+                override = new AssetOverride(
+                        assetPath,
+                        modulePath,
+                        item.getLong("size"),
+                        item.getString("sha256"),
+                        item.optBoolean("materialize", true)
+                );
+            } else if (AssetOverride.MODE_ALIAS.equals(mode)) {
+                override = indexedOverride(
+                        item,
+                        assetPath,
+                        mode,
+                        normalizeIndexPath(item.getString("sourceAssetPath"), "sourceAssetPath")
+                );
+            } else if (AssetOverride.MODE_PASSTHROUGH.equals(mode)) {
+                override = indexedOverride(item, assetPath, mode, assetPath);
+            } else if (AssetOverride.MODE_TRANSPARENT.equals(mode)) {
+                int width = item.getInt("width");
+                int height = item.getInt("height");
+                if (width <= 0 || height <= 0 || width > 8192 || height > 8192) {
+                    throw new IllegalArgumentException(
+                            "transparent dimensions are invalid: " + width + "x" + height
+                    );
+                }
+                override = new AssetOverride(
+                        assetPath,
+                        mode,
+                        "",
+                        "",
+                        0,
+                        "",
+                        width,
+                        height,
+                        true
+                );
+            } else {
+                throw new IllegalArgumentException("Unsupported override mode: " + mode);
+            }
             loaded.put(assetPath, override);
         }
 
@@ -97,6 +131,33 @@ final class AssetOverrideIndex {
 
     Collection<AssetOverride> entries() {
         return overrides.values();
+    }
+
+    private static AssetOverride indexedOverride(
+            JSONObject item,
+            String assetPath,
+            String mode,
+            String sourceAssetPath
+    ) throws Exception {
+        long sourceSize = item.getLong("sourceSize");
+        String sourceSha256 = item.getString("sourceSha256").toLowerCase(java.util.Locale.US);
+        if (sourceSize < 0) {
+            throw new IllegalArgumentException("sourceSize must not be negative");
+        }
+        if (!sourceSha256.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("sourceSha256 must be 64 lowercase hex characters");
+        }
+        return new AssetOverride(
+                assetPath,
+                mode,
+                "",
+                sourceAssetPath,
+                sourceSize,
+                sourceSha256,
+                0,
+                0,
+                true
+        );
     }
 
     private static String normalize(String path) {

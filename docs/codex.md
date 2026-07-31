@@ -6,7 +6,7 @@
 - 目标：把 Arcaea 素材改包迁移成 LSPosed 模块，不修改官方 `moe.low.arc` APK，不改签名，不改包名。
 - 模块包名：`dev.arc.assets`
 - 目标包名 / 推荐作用域：`moe.low.arc`
-- 版本：`0.5.1 (6)`
+- 版本：`0.6 (7)`
 - 覆盖素材数量：348
 - 当前结论：MVP 架构已完成并经设备验证。
 
@@ -15,8 +15,8 @@
 - `dev.arc.assets` 有普通桌面入口 `MainActivity`。
 - UI 标题为 `Arc customize`，提供注入开关、当前修改素材数量、当前覆盖栈状态、可滚动素材包列表、ZIP 导入、刷新、复制诊断、Open Arcaea。
 - 素材包：
-  - `difference`：项目侧当前修改素材包，保存在 `Arc_dark/packs/difference/`，用于标准化整理当前 348 个替换素材，不在 Android UI 中作为资源包项目显示。
-  - `pairumu_cat_dark`：模块 APK 内置可选资源包，UI 显示为 `派尔姆猫_dark`，来自 Arcaea `6.15.0c` 原包与改包同名 `assets/` 文件 SHA-256 差异，共 296 个素材，封面为内置 `cover.jpg`。
+  - `difference`：项目侧 348 条格式 2 兼容索引，保存在 `Arc_dark/packs/difference/`，不含游戏图片，也不在 Android UI 中显示。
+  - `pairumu_cat_dark`：模块 APK 内置可选索引包，UI 显示为 `派尔姆猫_dark`；Arcaea `6.16.0c` 配置包含 170 条官方别名、124 条透明图生成、2 条同路径直通。APK 不携带游戏图片或封面，UI 封面从已安装游戏读取并校验后显示。
   - 第三方 ZIP：UI 选择后通过 URI 授权交给目标进程解包到 `/sdcard/Android/media/moe.low.arc/ArcDark/packs/<packId>/`。
 - 控制文件：
   - UI 本地配置：`/data/user/0/dev.arc.assets/files/control.json`
@@ -37,10 +37,16 @@
 
 ## 已验证结果
 
-- `pairumu_cat_dark` 已在测试机中启用并进入覆盖栈。
+- 2026-07-31 在 Android 16 / API 36 测试机完成 0.6 冷缓存验证，目标为 split 安装的 Arcaea `6.16.0 (1209710)`。
+- `pairumu_cat_dark` 已启用并进入覆盖栈；官方源可从游戏 `files/cb/active` 下载内容或 APK/split assets 取得，且必须通过大小与 SHA-256 校验。
 - LSPosed 日志确认 `using built-in layer pairumu_cat_dark assets=296`、`provider initialized for [pairumu_cat_dark]`、`native install registered 296 assets`。
+- native 日志确认实际命中 `img/track.png`、`img/note.png`、`img/note_hold.png`、`models/tap_l.png` 等读取请求。
+- 冷启动生成 12 个官方源缓存和 33 个透明尺寸缓存；抽检官方文件哈希一致，1024 × 1024 透明 PNG 的 alpha 全为 0。
+- UI 冷缓存读取官方 `img/default_jacket_256.jpg`，校验 47,667 字节及 SHA-256 后成功显示材质包封面，不再使用 `IMG` 占位。
 - 点击已启用资源包的 `×` 可清空最后一个启用层，让目标回到原始资源。
 - 关闭注入后，日志显示 `hooks not installed`，没有 native install 注册。
+
+完整记录见 `docs/evidence/arc-customize-0.6-device-validation.md`。
 
 ## 构建
 

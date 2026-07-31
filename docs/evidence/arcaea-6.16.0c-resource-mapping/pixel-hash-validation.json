@@ -1,0 +1,9 @@
+{
+  "tool": "Pillow 12.2.0",
+  "normalization": "Decode image and convert to RGBA; SHA-256 includes dimensions and RGBA bytes.",
+  "oldContentGroups": 43,
+  "currentOfficialPngJpgFiles": 5545,
+  "rawFileSha256MatchedGroups": 8,
+  "decodedPixelSha256MatchedGroups": 8,
+  "additionalGroupsRecoveredByPixelHash": 0
+}

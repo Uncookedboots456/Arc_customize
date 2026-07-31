@@ -1,9 +1,9 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "difference",
   "name": "Difference",
-  "version": "2026.06",
-  "description": "Current material differences bundled with Arc customize.",
+  "version": "6.16.0c",
+  "description": "Index-only compatibility map using official aliases and generated transparent textures.",
   "author": "Arc customize",
   "cover": ""
 }

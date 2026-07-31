@@ -49,7 +49,8 @@ final class UiStatusSnapshot {
         String overrideCount = readOverrideCount(context);
         boolean targetInstalled = isPackageInstalled(context, ArcDarkConstants.TARGET_PACKAGE);
         File targetRoot = ArcDarkPaths.estimatedTargetRoot();
-        List<PackCatalog.Entry> packs = PackCatalog.list(targetRoot, materializeBuiltInCover(context));
+        File builtInCover = targetInstalled ? OfficialCoverMaterializer.materialize(context) : null;
+        List<PackCatalog.Entry> packs = PackCatalog.list(targetRoot, builtInCover);
         appendMissingActivePacks(packs, control.activePackOrder);
         String checkedAt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
         String activeOrder = control.activePackOrder.isEmpty()
@@ -76,6 +77,7 @@ final class UiStatusSnapshot {
                 + "\nActive pack order: " + activeOrder
                 + "\nDifference overrides: " + overrideCount
                 + "\nKnown packs: " + packs.size()
+                + "\nBuilt-in cover: " + (builtInCover == null ? "Unavailable" : "Verified official asset")
                 + "\nControl file: " + ArcDarkControl.controlFile(context).getAbsolutePath()
                 + "\nTarget control: " + new File(targetRoot, ArcDarkConstants.CONTROL_FILE_NAME).getAbsolutePath()
                 + "\nTarget root: " + targetRoot.getAbsolutePath();
@@ -111,22 +113,6 @@ final class UiStatusSnapshot {
                         false
                 ));
             }
-        }
-    }
-
-    private static File materializeBuiltInCover(Context context) {
-        File coverFile = new File(context.getCacheDir(), ArcDarkConstants.BUILT_IN_PACK_COVER_CACHE);
-        if (coverFile.isFile() && coverFile.length() > 0) {
-            return coverFile;
-        }
-        try {
-            ArcDarkFileOps.copy(
-                    context.getAssets().open(ArcDarkConstants.BUILT_IN_PACK_COVER_ASSET),
-                    coverFile
-            );
-            return coverFile.isFile() ? coverFile : null;
-        } catch (Exception ignored) {
-            return null;
         }
     }
 
